@@ -1,39 +1,49 @@
 import requests
-import json
+import pandas as pd
+import io
 
 class TADataClient:
     def __init__(self, base_url, token):
-        # 确保基础 URL 不带结尾斜杠，并补全数数报表 API 路径
         self.base_url = base_url.rstrip('/')
-        # 数数报表查询的标准端点
-        self.api_url = f"{self.base_url}/api/v1/report/data"
+        # 对应文档中的接口路径
+        self.api_url = f"{self.base_url}/querySql"
         self.token = token
 
-    def fetch_report_data(self, report_params):
+    def query_sql(self, sql_string):
+        """
+        执行 SQL 查询
+        """
+        # 参数根据文档：token, format, sql
+        params = {
+            "token": self.token,
+            "format": "csv", # 使用 csv 格式方便 pandas 直接读取，节省解析时间
+            "sql": sql_string
+        }
+        
         headers = {
-            "Content-Type": "application/json",
-            "token": self.token
+            "Content-Type": "application/x-www-form-urlencoded"
         }
         
         try:
-            # verify=False 解决私有化部署 https 证书不受信任导致请求卡死或返回空的问题
+            # SQL 接口通常通过 POST 提交表单数据
             response = requests.post(
                 self.api_url, 
-                data=json.dumps(report_params), 
+                params=params, # 对应文档中在 URL 后拼参数
                 headers=headers,
-                timeout=30,
-                verify=False 
+                timeout=60,
+                verify=False
             )
             
-            # 返回完整的响应对象供前端分析
-            return {
-                "status_code": response.status_code,
-                "text": response.text,
-                "data": response.json() if response.status_code == 200 else None
-            }
+            if response.status_code == 200:
+                # 如果返回的是 CSV 文本
+                if "text/csv" in response.headers.get("Content-Type", "") or not response.text.startswith('{'):
+                    df = pd.read_csv(io.StringIO(response.text))
+                    return {"status": "success", "data": df}
+                else:
+                    # 如果返回的是 JSON (通常是报错信息)
+                    return {"status": "error", "message": response.json()}
+            else:
+                return {"status": "error", "message": f"HTTP {response.status_code}: {response.text}"}
+                
         except Exception as e:
-            return {
-                "status_code": "EXCEPTION",
-                "text": str(e),
-                "data": None
-            }
+            return {"status": "error", "message": str(e)}
