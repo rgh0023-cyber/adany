@@ -2,9 +2,9 @@ class AdAnalysis:
     @staticmethod
     def get_advertising_report_sql(project_id, start_date, end_date):
         """
-        真实的投放归因 SQL 模板 - 完整版
+        投放归因 SQL 模板。
+        注意：Python f-string 需要用 {{ 和 }} 来表示 SQL 里的原始大括号。
         """
-        # 注意：SQL 内部原本的大括号已全部转义为 {{ 和 }}，以防 Python f-string 解析错误
         return f"""
 /* sessionProperties: {{"ignore_downstream_preferences":"true"}} */
 SELECT * FROM (
@@ -52,7 +52,6 @@ SELECT * FROM (
                 arbitrary(internal_amount_22) internal_amount_22, arbitrary(internal_amount_23) internal_amount_23,
                 array_agg(os_val) FILTER (WHERE os_val IS NOT NULL) as all_os
             FROM (
-                /* 模块 A: Cost */
                 SELECT 
                     CASE 
                         WHEN "te_ads_object" IS NULL THEN '自然量'
@@ -73,10 +72,7 @@ SELECT * FROM (
                 WHERE "$part_event" = 'appsflyer_master_data' 
                   AND "$part_date" BETWEEN '{start_date}' AND '{end_date}'
                 GROUP BY 1, 2
-
                 UNION ALL
-
-                /* 模块 B: 行为归因 */
                 SELECT 
                     ta_u.group_0,
                     ta_date_trunc('day', ta_u.inst_t, 1) AS "$__Date_Time",
@@ -142,23 +138,3 @@ SELECT * FROM (
 ORDER BY "Date" DESC, total_amount DESC 
 LIMIT 1000
 """
-    @staticmethod
-    def calculate_metrics(df):
-        """
-        根据投放报表计算汇总指标
-        """
-        if df.empty:
-            return {}
-        
-        # 确保列名匹配 SQL 中的别名（去重引号）
-        total_cost = df['Cost'].sum()
-        iap_rev = df['IAP Revenue'].sum()
-        ad_rev = df['Ad Revenue'].sum()
-        
-        return {
-            "total_cost": total_cost,
-            "iap_revenue": iap_rev,
-            "ad_revenue": ad_rev,
-            "total_revenue": iap_rev + ad_rev,
-            "roi": (iap_rev + ad_rev) / total_cost if total_cost > 0 else 0
-        }
