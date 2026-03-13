@@ -2,16 +2,19 @@ class AdAnalysis:
     @staticmethod
     def get_advertising_report_sql(project_id, start_date, end_date, dimension="campaign_name"):
         """
-        投放归因 SQL 模板。
-        dimension 支持: 'campaign_name' (广告计划), 'adgroup_name' (广告组), 'ad_name' (广告创意)
+        修复版：解决 Column 'te_ads_object' is ambiguous 错误。
+        dimension 支持: 'campaign_name', 'adgroup_name', 'ad_name'
         """
-        # 映射维度字段
+        # 映射维度字段，显式指定表别名 u 或直接引用
         dim_map = {
-            "campaign_name": '"te_ads_object"."campaign_name"',
-            "adgroup_name": '"te_ads_object"."adgroup_name"',
-            "ad_name": '"te_ads_object"."ad_name"'
+            "campaign_name": 'u."te_ads_object"."campaign_name"',
+            "adgroup_name": 'u."te_ads_object"."adgroup_name"',
+            "ad_name": 'u."te_ads_object"."ad_name"'
         }
-        dim_field = dim_map.get(dimension, '"te_ads_object"."campaign_name"')
+        dim_field_with_alias = dim_map.get(dimension, 'u."te_ads_object"."campaign_name"')
+        
+        # 对于第一个子查询（appsflyer_master_data），它是单表查询，不需要 u. 前缀
+        dim_field_raw = dim_field_with_alias.replace('u.', '')
 
         template = """
 /* sessionProperties: {"ignore_downstream_preferences":"true"} */
@@ -61,12 +64,13 @@ SELECT * FROM (
                 arbitrary(internal_amount_22) internal_amount_22, arbitrary(internal_amount_23) internal_amount_23,
                 array_agg(os_val) FILTER (WHERE os_val IS NOT NULL) as all_os
             FROM (
+                -- 1. 消耗汇总块
                 SELECT 
                     CASE 
                         WHEN "te_ads_object" IS NULL THEN '自然量'
-                        WHEN <<DIM_FIELD>> IS NULL THEN '自然量'
-                        WHEN <<DIM_FIELD>> = '-' THEN '自然量'
-                        ELSE <<DIM_FIELD>> 
+                        WHEN <<DIM_RAW>> IS NULL THEN '自然量'
+                        WHEN <<DIM_RAW>> = '-' THEN '自然量'
+                        ELSE <<DIM_RAW>> 
                     END AS group_0,
                     CASE 
                         WHEN "te_ads_object" IS NULL THEN 'Organic'
@@ -86,7 +90,10 @@ SELECT * FROM (
                 WHERE "$part_event" = 'appsflyer_master_data' 
                   AND "$part_date" BETWEEN '<<START_DATE>>' AND '<<END_DATE>>'
                 GROUP BY 1, 2, 3
+
                 UNION ALL
+
+                -- 2. 行为归因块
                 SELECT 
                     ta_u.group_0,
                     ta_u.media_source,
@@ -161,5 +168,6 @@ LIMIT 1000
         sql = template.replace("<<PROJECT_ID>>", str(project_id))\
                       .replace("<<START_DATE>>", start_date)\
                       .replace("<<END_DATE>>", end_date)\
-                      .replace("<<DIM_FIELD>>", dim_field)
+                      .replace("<<DIM_FIELD>>", dim_field_with_alias)\
+                      .replace("<<DIM_RAW>>", dim_field_raw)
         return sql
