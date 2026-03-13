@@ -2,7 +2,7 @@ class AdAnalysis:
     @staticmethod
     def get_absolute_summary_sql(project_id, start_date, end_date):
         """
-        全量汇总 SQL：按天汇总所有消耗和营收，确保 100% 归集且保留日期。
+        全量汇总 SQL：修复内层 GROUP BY 逻辑，确保数据能正常产出。
         """
         return f"""
 /* sessionProperties: {{"ignore_downstream_preferences":"true"}} */
@@ -24,21 +24,22 @@ SELECT * FROM (
         SUM(ad_uv) AS "Ad UV",
         SUM(ad_rev) AS "Ad Revenue",
         SUM(cost_val) AS "total_amount",
-        count(cost_val) OVER () AS "group_num_0",
-        count(1) OVER () AS "group_num"
+        1 AS "group_num_0",
+        1 AS "group_num"
     FROM (
-        -- 1. 消耗：按天聚合
+        -- 1. 消耗：按天预聚合
         SELECT 
             ta_date_trunc('day', "#event_time", 1) AS "$__Date_Time",
-            CAST(cost AS DOUBLE) as cost_val,
+            SUM(CAST(cost AS DOUBLE)) as cost_val,
             0 as plot_uv, 0 as iap_uv, 0 as iap_rev, 0 as ad_uv, 0 as ad_rev
         FROM v_event_{project_id}
         WHERE "$part_event" = 'appsflyer_master_data' 
           AND "$part_date" BETWEEN '{start_date}' AND '{end_date}'
+        GROUP BY 1
         
         UNION ALL
         
-        -- 2. 行为与营收：按天聚合
+        -- 2. 行为与营收：按天预聚合
         SELECT 
             ta_date_trunc('day', "#event_time", 1) AS "$__Date_Time",
             0 as cost_val,
@@ -60,11 +61,14 @@ ORDER BY "Date" DESC
     @staticmethod
     def get_advertising_report_sql(project_id, start_date, end_date, dimension="campaign_name"):
         """
-        多维归因 SQL：基于 te_ads_object 字典。
+        多维归因 SQL（保持稳定）
         """
         field_mapping = {
             "campaign_name": "campaign_name",
-            "adgroup_name": "ad_group_name", 
+            "广告计划": "campaign_name",
+            "广告组": "ad_group_name",
+            "adgroup_name": "ad_group_name",
+            "广告创意": "ad_name",
             "ad_name": "ad_name"
         }
         
@@ -136,7 +140,7 @@ SELECT * FROM (
                     NULL internal_amount_1, NULL internal_amount_2, NULL internal_amount_3, 
                     NULL internal_amount_4, NULL internal_amount_5, NULL internal_amount_6, NULL internal_amount_7,
                     NULL internal_amount_8, NULL internal_amount_9, NULL internal_amount_10, NULL internal_amount_11,
-                    NULL internal_amount_12, NULL internal_amount_12, NULL internal_amount_14, NULL internal_amount_15,
+                    NULL internal_amount_12, NULL internal_amount_13, NULL internal_amount_14, NULL internal_amount_15,
                     NULL internal_amount_16, NULL internal_amount_17, NULL internal_amount_18, NULL internal_amount_19,
                     NULL internal_amount_20, NULL internal_amount_21, NULL internal_amount_22, NULL internal_amount_23,
                     NULL as os_val
