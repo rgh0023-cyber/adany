@@ -1,11 +1,15 @@
 import pandas as pd
+import datetime
 
 class AdAnalysis:
     @staticmethod
     def get_absolute_summary_sql(project_id, start_date, end_date):
         """
-        全量汇总 SQL：通过关联用户属性表，补全 ECPM 分布和 L等级 UV 数据。
+        全量汇总 SQL (Cohort 模式)：
+        锁定 start_date 到 end_date 期间新增的用户，统计他们从激活至今的全量累积数据。
         """
+        today_str = datetime.date.today().strftime('%Y-%m-%d')
+        
         return f"""
 /* sessionProperties: {{"ignore_downstream_preferences":"true"}} */
 SELECT * FROM (
@@ -22,10 +26,9 @@ SELECT * FROM (
         SUM(c14) AS "L90 UV", SUM(c15) AS "L100 UV",
         SUM(c6) AS "IAP UV", SUM(c23) AS "IAP Times", SUM(c7)/100*0.7 AS "IAP Revenue",
         SUM(c4) AS "Ad UV", SUM(c5) AS "Ad Revenue", 
-        SUM(c0) as total_amount,
-        1 as group_num_0, 1 as group_num
+        SUM(c0) as total_amount, 1 as group_num_0, 1 as group_num
     FROM (
-        -- 1. 消耗：AF 原始消耗
+        -- 1. 锁定时间范围内的广告消耗
         SELECT 
             ta_date_trunc('day', "#event_time", 1) AS "$__Date_Time",
             SUM(CAST(cost AS DOUBLE)) as c0,
@@ -36,7 +39,7 @@ SELECT * FROM (
         WHERE "$part_event" = 'appsflyer_master_data' AND "$part_date" BETWEEN '{start_date}' AND '{end_date}'
         GROUP BY 1
         UNION ALL
-        -- 2. 行为：关联 ECPM 属性对齐明细口径
+        -- 2. 统计这批新增用户从激活到今日(Today)的所有累积行为
         SELECT 
             ta_date_trunc('day', ta_u.inst_t, 1) AS "$__Date_Time",
             0 as c0,
@@ -67,7 +70,7 @@ SELECT * FROM (
             SELECT "#user_id", "$part_event", "level_id", "ad_format", "revenue", "iap_product_currency", "#app_version"
             FROM v_event_{project_id} 
             WHERE "$part_event" IN ('first_finish_plot', 'level_start', 'applovin_ad_revenue_impression_level', 'iap_recharge_succeed')
-              AND "$part_date" BETWEEN '{start_date}' AND '{end_date}'
+              AND "$part_date" BETWEEN '{start_date}' AND '{today_str}' 
         ) ta_ev 
         INNER JOIN (
             SELECT ev."#user_id", u."app_version_first" AS v_first, min(ev."#event_time") AS inst_t, arbitrary(u.first_rv_ecpm) as ecpm
@@ -87,11 +90,15 @@ ORDER BY "Date" DESC
 
     @staticmethod
     def get_advertising_report_sql(project_id, start_date, end_date, dimension="campaign_name"):
-        """保持原有明细逻辑，不做任何修改。"""
+        """
+        广告层级 SQL (Cohort 模式)：同步重构以对齐汇总口径。
+        """
+        today_str = datetime.date.today().strftime('%Y-%m-%d')
         field_mapping = {"广告计划": "campaign_name", "广告组": "ad_group_name", "广告创意": "ad_name"}
         real_field = field_mapping.get(dimension, dimension)
         dim_raw = f'"te_ads_object"."{real_field}"'
         dim_with_u = f'u."te_ads_object"."{real_field}"'
+        
         return f"""
 /* sessionProperties: {{"ignore_downstream_preferences":"true"}} */
 SELECT * FROM (
@@ -128,6 +135,7 @@ SELECT * FROM (
                 arbitrary(internal_amount_22) internal_amount_22, arbitrary(internal_amount_23) internal_amount_23,
                 array_agg(os_val) FILTER (WHERE os_val IS NOT NULL) as all_os
             FROM (
+                -- 消耗(Event Time)
                 SELECT 
                     CASE WHEN "te_ads_object" IS NULL OR {dim_raw} IS NULL THEN '自然量' ELSE {dim_raw} END AS group_0,
                     CASE WHEN "te_ads_object" IS NULL OR "te_ads_object"."media_source" IS NULL THEN 'Organic' ELSE "te_ads_object"."media_source" END AS media_source,
@@ -143,6 +151,7 @@ SELECT * FROM (
                 WHERE "$part_event" = 'appsflyer_master_data' AND "$part_date" BETWEEN '{start_date}' AND '{end_date}'
                 GROUP BY 1, 2, 3
                 UNION ALL
+                -- 行为(Cohort Time, 统计至今日)
                 SELECT 
                     ta_u.group_0, ta_u.media_source, ta_date_trunc('day', ta_u.inst_t, 1) AS "$__Date_Time",
                     NULL internal_amount_0,
@@ -174,7 +183,7 @@ SELECT * FROM (
                     SELECT "#user_id", "$part_event", "level_id", "ad_format", "revenue", "iap_product_currency", "#app_version"
                     FROM v_event_{project_id} 
                     WHERE "$part_event" IN ('first_finish_plot', 'level_start', 'applovin_ad_revenue_impression_level', 'iap_recharge_succeed')
-                      AND "$part_date" BETWEEN '{start_date}' AND '{end_date}'
+                      AND "$part_date" BETWEEN '{start_date}' AND '{today_str}' 
                 ) ta_ev 
                 INNER JOIN (
                     SELECT ev."#user_id", 
