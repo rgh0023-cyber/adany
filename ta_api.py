@@ -1,6 +1,5 @@
 import requests
 import urllib3
-from urllib.parse import quote
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -10,14 +9,33 @@ class TAClient:
         self.token = token
 
     def execute_query(self, sql):
-        encoded_sql = quote(sql)
-        full_url = f"{self.api_url}?token={self.token}&format=csv&sql={encoded_sql}"
+        # 414 修复：不再拼接 URL，而是构建表单数据
+        payload = {
+            "token": self.token,
+            "format": "csv",
+            "sql": sql
+        }
+        
+        headers = {
+            "Content-Type": "application/x-www-form-urlencoded"
+        }
+        
         try:
-            response = requests.post(full_url, timeout=60, verify=False)
+            # 使用 data=payload 将参数放入 HTTP Body
+            response = requests.post(
+                self.api_url, 
+                data=payload, 
+                headers=headers,
+                timeout=120, # 归因 SQL 较重，增加超时时间
+                verify=False
+            )
+            
             if response.status_code == 200:
+                # 检查返回的是否是错误 JSON
                 if response.text.strip().startswith('{"code"'):
                     return None, response.json()
                 return response.text, None
-            return None, f"HTTP Error: {response.status_code}"
+            else:
+                return None, f"HTTP Error: {response.status_code} - {response.reason}"
         except Exception as e:
             return None, str(e)
