@@ -6,47 +6,39 @@ def clean_sql_response(raw_text):
     if not raw_text or len(raw_text.strip()) == 0:
         return pd.DataFrame()
 
+    content = raw_text
     try:
-        # 再次尝试在字符串层面去除常见的乱码标志
-        content = raw_text.strip()
-        
-        # 物理对齐表头（根据 SQL 顺序）
+        # 针对乱码的终极修复方案
+        content = raw_text.encode('latin-1').decode('gbk')
+    except:
+        pass
+
+    try:
+        # 物理对齐表头（注意增加了 Media Source）
         expected_cols = [
-            'Date', 'Campaign Name', 'OS', 'Cost', 'Plot UV', 
+            'Date', 'Dimension Value', 'Media Source', 'OS', 'Cost', 'Plot UV', 
             'ECPM_Null', 'ECPM_0_100', 'ECPM_100_200', 'ECPM_200_300', 
             'ECPM_300_400', 'ECPM_400_500', 'ECPM_500+',
             'L10 UV', 'L20 UV', 'L30 UV', 'L40 UV', 'L50 UV', 'L60 UV', 'L70 UV', 'L80 UV', 'L90 UV', 'L100 UV',
             'IAP UV', 'IAP Times', 'IAP Revenue', 'Ad UV', 'Ad Revenue', 'total_amount', 'group_num_0', 'group_num'
         ]
 
-        # 尝试使用逗号读取，如果不成尝试制表符
-        try:
-            df = pd.read_csv(io.StringIO(content), header=None, quotechar='"', skipinitialspace=True)
-        except:
-            df = pd.read_csv(io.StringIO(content), header=None, sep='\t')
+        df = pd.read_csv(io.StringIO(content.strip()), header=None, quotechar='"', skipinitialspace=True)
         
-        # 判断第一行是不是残留的英文字符表头
-        if "Date" in str(df.iloc[0,0]) or "date" in str(df.iloc[0,0]).lower():
+        # 过滤残留表头行
+        if "Date" in str(df.iloc[0,0]) or "Dimension" in str(df.iloc[0,0]):
             df = df.iloc[1:].reset_index(drop=True)
         
-        # 强制指定列名
-        df.columns = expected_cols[:len(df.columns)]
+        df.columns = expected_cols[:df.shape[1]]
 
-        # 深度清洗：去除引号、乱码不可见字符
-        def scrub_text(val):
-            if isinstance(val, str):
-                # 过滤掉非打印字符，但保留中文和常用标点
-                return re.sub(r'["\'\r\n\t]', '', val).strip()
-            return val
+        # 清洗
+        df = df.applymap(lambda x: re.sub(r'["\'\r\n\t]', '', str(x)).strip() if isinstance(x, str) else x)
 
-        df = df.applymap(scrub_text)
-
-        # 数值转换
-        for col in ['Cost', 'IAP Revenue', 'Ad Revenue']:
+        # 核心数值列转换
+        for col in ['Cost', 'IAP Revenue', 'Ad Revenue', 'Plot UV']:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
 
         return df
-    except Exception as e:
-        print(f"Processor Error: {e}")
+    except:
         return pd.DataFrame()
