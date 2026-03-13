@@ -3,9 +3,8 @@ class AdAnalysis:
     def get_advertising_report_sql(project_id, start_date, end_date):
         """
         投放归因 SQL 模板。
-        使用 .replace 替换变量，彻底避免 Python f-string 对 SQL 内部大括号的干扰。
+        使用 .replace 彻底避免 Python f-string 对 SQL 内部大括号的干扰。
         """
-        # 定义原始 SQL 模板，注意：SQL 内部的 { } 保持原样，无需双写
         template = """
 /* sessionProperties: {"ignore_downstream_preferences":"true"} */
 SELECT * FROM (
@@ -53,7 +52,6 @@ SELECT * FROM (
                 arbitrary(internal_amount_22) internal_amount_22, arbitrary(internal_amount_23) internal_amount_23,
                 array_agg(os_val) FILTER (WHERE os_val IS NOT NULL) as all_os
             FROM (
-                /* 模块 A: Cost 数据 */
                 SELECT 
                     CASE 
                         WHEN "te_ads_object" IS NULL THEN '自然量'
@@ -74,10 +72,7 @@ SELECT * FROM (
                 WHERE "$part_event" = 'appsflyer_master_data' 
                   AND "$part_date" BETWEEN '<<START_DATE>>' AND '<<END_DATE>>'
                 GROUP BY 1, 2
-
                 UNION ALL
-
-                /* 模块 B: 用户行为归因 */
                 SELECT 
                     ta_u.group_0,
                     ta_date_trunc('day', ta_u.inst_t, 1) AS "$__Date_Time",
@@ -143,9 +138,5 @@ SELECT * FROM (
 ORDER BY "Date" DESC, total_amount DESC 
 LIMIT 1000
 """
-        # 执行变量替换
-        sql = template.replace("<<PROJECT_ID>>", str(project_id))
-        sql = sql.replace("<<START_DATE>>", start_date)
-        sql = sql.replace("<<END_DATE>>", end_date)
-        
+        sql = template.replace("<<PROJECT_ID>>", str(project_id)).replace("<<START_DATE>>", start_date).replace("<<END_DATE>>", end_date)
         return sql
