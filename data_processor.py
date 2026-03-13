@@ -2,17 +2,26 @@ import pandas as pd
 import io
 
 def clean_sql_response(raw_text):
-    """直接将 CSV 响应转化为 DataFrame，现在的 SQL 返回的是多行多列的标准表格"""
+    """清洗 CSV 并强制标准化所有列名"""
     if not raw_text or len(raw_text.strip()) == 0:
         return pd.DataFrame()
     
     try:
-        # 现在的 SQL 是标准报表，通常自带表头
+        # 读取 CSV
         df = pd.read_csv(io.StringIO(raw_text))
-        # 自动清理列名中可能的引号
-        df.columns = [c.replace('"', '').strip() for c in df.columns]
+        
+        # 核心修复：移除列名中的双引号、单引号及首尾空格
+        # 解决 SQL 别名 "Cost" 变成 Pandas 列名 '"Cost"' 的问题
+        df.columns = [
+            str(c).replace('"', '').replace("'", "").strip() 
+            for c in df.columns
+        ]
+        
+        # 将 Date 列转换为标准日期格式（如果存在）
+        if 'Date' in df.columns:
+            df['Date'] = pd.to_datetime(df['Date']).dt.date
+            
         return df
-    except Exception:
+    except Exception as e:
+        print(f"Data processing error: {e}")
         return pd.DataFrame()
-
-# 此前的 parse_ta_map_column 在这条 SQL 中不再需要，可以保留作为工具函数
