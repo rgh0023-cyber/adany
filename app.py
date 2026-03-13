@@ -1,17 +1,22 @@
 import streamlit as st
 import pandas as pd
-import time
 from ta_api import TADataClient
+import urllib3
 
-st.title("🚀 数数数据分析看板")
+# 禁用 https 安全警告（配合 verify=False）
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# 侧边栏配置
+st.set_page_config(page_title="TA 数据分析", layout="wide")
+
+st.title("🚀 广告投放数据抓取测试")
+
 with st.sidebar:
-    st.header("API 配置")
-    token = st.text_input("输入 TA API Token", type="password")
+    st.header("1. 接口配置")
+    token = st.text_input("API Token", type="password", help="从数数后台数据API页面获取")
     project_id = st.number_input("项目 ID", value=46)
+    api_url = st.text_input("API 地址", value="https://ta-open.jackpotlandslots.com")
 
-# 查询参数（对应你提供的示例）
+# 预设你提供的 JSON 参数
 params = {
     "eventView": {
         "endTime": "2026-03-12 23:59:59",
@@ -26,48 +31,36 @@ params = {
     "projectId": project_id
 }
 
-if st.button("开始执行抓取", use_container_width=True):
+if st.button("开始抓取数据", use_container_width=True):
     if not token:
-        st.error("❌ 请先在侧边栏输入 Token")
+        st.error("请先输入 Token")
     else:
-        # 使用 st.status 展示具体步骤
-        with st.status("正在处理数据请求...", expanded=True) as status:
+        with st.status("正在执行 API 联调...", expanded=True) as status:
+            st.write("📡 发起请求到数数服务器...")
+            client = TADataClient(api_url, token)
+            result = client.fetch_report_data(params)
             
-            # 步骤 1：初始化
-            st.write("1. 初始化 API 客户端...")
-            client = TADataClient("https://ta-open.jackpotlandslots.com", token)
-            time.sleep(0.5) # 仅为了演示效果，实际可删除
+            st.write(f"🌐 HTTP 状态码: {result['status_code']}")
             
-            # 步骤 2：网络请求
-            st.write("2. 正在连接数数科技服务器并发送查询语句...")
-            try:
-                raw_data = client.fetch_report_data(params)
-                
-                if raw_data:
-                    # 步骤 3：数据解析
-                    st.write("3. 接口响应成功，正在解析 JSON 数据...")
-                    
-                    # 这里的逻辑需要根据你实际拿到的 JSON 结构调整
-                    # 如果返回的是 {'rows': [...]}
-                    if "rows" in raw_data:
-                        df = pd.DataFrame(raw_data["rows"])
-                        st.write(f"4. 成功加载 {len(df)} 行数据。")
-                        
-                        status.update(label="✅ 数据抓取完成！", state="complete", expanded=False)
-                        
-                        # 展示数据
-                        st.divider()
-                        st.subheader("📊 查询结果")
+            if result['status_code'] == 200:
+                resp_json = result['data']
+                if resp_json.get("code") == 0:
+                    st.write("✅ 业务逻辑成功，正在渲染表格...")
+                    # 尝试解析数数特有的 rows 数据结构
+                    data_payload = resp_json.get("data", {})
+                    if "rows" in data_payload:
+                        df = pd.DataFrame(data_payload["rows"])
+                        status.update(label="数据抓取成功", state="complete", expanded=False)
+                        st.subheader("📊 数据结果预览")
                         st.dataframe(df, use_container_width=True)
-                        st.download_button("下载为 CSV", df.to_csv(index=False), "ta_data.csv")
                     else:
-                        st.write("⚠️ 接口返回格式异常，未找到 rows 字段。")
-                        st.json(raw_data)
-                        status.update(label="❌ 数据解析失败", state="error")
+                        st.warning("请求成功但未找到 rows 数据。")
+                        st.json(resp_json)
                 else:
-                    st.write("❌ 获取数据为空，请检查 Token 或 ProjectID。")
-                    status.update(label="❌ 抓取终止", state="error")
-                    
-            except Exception as e:
-                st.write(f"‼️ 发生错误: {str(e)}")
-                status.update(label="❌ 运行出错", state="error")
+                    st.error(f"❌ 数数报错 (code={resp_json.get('code')}): {resp_json.get('msg')}")
+                    st.json(resp_json)
+                    status.update(label="业务报错", state="error")
+            else:
+                st.error(f"🚨 请求失败 (HTTP {result['status_code']})")
+                st.code(result['text'], language="html")
+                status.update(label="连接失败", state="error")
