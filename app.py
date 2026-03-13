@@ -5,8 +5,8 @@ from ta_api import TAClient
 from data_processor import clean_sql_response
 from analysis_lib import AdAnalysis
 
-st.set_page_config(page_title="投放 ROI 归因系统", layout="wide")
-st.title("🎯 广告投放多维归因报表")
+st.set_page_config(page_title="投放 ROI 归因系统 - 调试模式", layout="wide")
+st.title("🎯 归因报表 - 原始数据排查")
 
 # --- 1. 侧边栏配置 ---
 with st.sidebar:
@@ -16,69 +16,47 @@ with st.sidebar:
     project_id = st.number_input("项目 ID", value=46)
     st.divider()
     today = datetime.date.today()
-    d_range = st.date_input("分析周期", [today - datetime.timedelta(days=7), today])
+    # 稍微拉长一点时间范围，确保能抓到有消耗的数据
+    d_range = st.date_input("分析周期", [today - datetime.timedelta(days=14), today])
 
 # --- 2. 核心执行逻辑 ---
-if st.button("🚀 执行同步与归因分析", use_container_width=True):
+if st.button("🔍 获取原始数据快照", use_container_width=True):
     if not token:
-        st.error("请输入有效的 API Token")
-        st.stop()
+        st.error("请输入 API Token"); st.stop()
 
-    # 处理日期范围
+    # 处理日期
     if isinstance(d_range, (list, tuple)) and len(d_range) == 2:
         start_str, end_str = d_range[0].strftime('%Y-%m-%d'), d_range[1].strftime('%Y-%m-%d')
     else:
-        temp_date = d_range[0] if isinstance(d_range, (list, tuple)) else d_range
-        start_str = end_str = temp_date.strftime('%Y-%m-%d')
+        dt = d_range[0] if isinstance(d_range, list) else d_range
+        start_str = end_str = dt.strftime('%Y-%m-%d')
 
-    with st.status("数据处理中...", expanded=True) as status:
-        st.write("📝 正在构造归因 SQL...")
+    with st.status("正在抓取原始数据...", expanded=True) as status:
         sql = AdAnalysis.get_advertising_report_sql(project_id, start_str, end_str)
-        
-        st.write("🌐 正在调取数数 API...")
         client = TAClient(api_url, token)
+        
+        # 直接拿原始 Response 对象，看看字节层面的内容
         raw_text, error = client.execute_query(sql)
         
         if error:
-            st.error(f"API 调用失败: {error}")
-            status.update(label="❌ 任务失败", state="error")
-            st.stop()
-            
-        st.write("🧹 正在修复中文乱码并对齐表头...")
-        df = clean_sql_response(raw_text)
-        
-        if df is None or df.empty:
-            st.error("清洗后无有效数据。请检查原始快照。")
-            status.update(label="❌ 任务失败", state="error")
-            st.stop()
-        
-        status.update(label="✅ 分析完成", state="complete", expanded=False)
+            st.error(f"API 失败: {error}"); st.stop()
 
-    # --- 3. 结果展示 ---
-    st.divider()
+        status.update(label="✅ 数据已到达", state="complete")
+
+    # --- 重点：全屏展示快照 ---
+    st.subheader("🛠️ 原始响应数据 (前 2000 字符)")
+    st.info("提示：请查看下方代码块中，第二列（即日期后的那一列）的内容。如果是乱码，通常看起来像 'ç¬¬ä¸' 这种字符。")
     
-    # 汇总计算
-    total_cost = df['Cost'].sum()
-    total_iap = df['IAP Revenue'].sum()
-    total_ad = df['Ad Revenue'].sum()
-    total_rev = total_iap + total_ad
-    roi = (total_rev / total_cost) if total_cost > 0 else 0.0
+    # 使用 st.text 配合大容器，防止缩略显示
+    st.text_area("Raw CSV Output", value=raw_text[:2000], height=400)
 
-    # 指标卡
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("总消耗 (Cost)", f"${total_cost:,.2f}")
-    c2.metric("总营收 (IAP+Ad)", f"${total_rev:,.2f}")
-    c3.metric("整体 ROI", f"{roi:.2%}")
-    c4.metric("广告营收占比", f"{(total_ad/total_rev):.1%}" if total_rev > 0 else "0%")
-
-    # 详情表格
-    st.subheader("📋 投放归因明细")
-    # 仅展示核心关注列
-    display_cols = ['Date', 'Campaign Name', 'OS', 'Cost', 'IAP Revenue', 'Ad Revenue', 'Plot UV']
-    # 过滤掉不存在的列（防御）
-    actual_show = [c for c in display_cols if c in df.columns]
-    st.dataframe(df[actual_show], use_container_width=True, hide_index=True)
-
-    # 导出 CSV (使用 utf-8-sig 确保 Excel 打开中文正常)
-    csv_data = df.to_csv(index=False, encoding='utf-8-sig').encode('utf-8-sig')
-    st.download_button("📥 下载完整归因报表 (CSV)", csv_data, f"ROI_Report_{start_str}.csv", "text/csv")
+    # --- 尝试解析并显示表格 ---
+    st.divider()
+    st.subheader("📊 尝试解析后的表格预览")
+    df = clean_sql_response(raw_text)
+    
+    if not df.empty:
+        st.write("系统识别到的 Campaign Name 示例:", df['Campaign Name'].unique()[:5].tolist())
+        st.dataframe(df.head(20), use_container_width=True)
+    else:
+        st.error("解析失败，DataFrame 为空。请检查上方快照格式。")
