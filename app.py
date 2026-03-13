@@ -16,8 +16,8 @@ with st.sidebar:
     project_id = st.number_input("项目 ID", value=46)
     
     st.divider()
-    # 默认展示最近 7 天
     today = datetime.date.today()
+    # 允许选择时间范围
     d_range = st.date_input("分析周期", [today - datetime.timedelta(days=7), today])
 
 # --- 执行逻辑 ---
@@ -34,7 +34,7 @@ if st.button("🚀 执行同步与归因分析", use_container_width=True):
         sql = AdAnalysis.get_advertising_report_sql(project_id, start_str, end_str)
         
         # 2. 调用 API
-        st.write("🌐 正在连接数数服务器 (任务较重，请稍候)...")
+        st.write("🌐 正在连接数数服务器...")
         client = TAClient(api_url, token)
         raw_text, error = client.execute_query(sql)
         
@@ -42,25 +42,33 @@ if st.button("🚀 执行同步与归因分析", use_container_width=True):
             st.error(f"接口调用失败: {error}")
             status.update(label="❌ 任务失败", state="error")
             st.stop()
+
+        # 【调试步骤】展示原始响应前 500 个字符
+        with st.expander("🔍 原始响应快照 (用于证明数据存在)"):
+            if raw_text:
+                st.code(raw_text[:500], language="text")
+            else:
+                st.warning("原始响应完全为空！")
             
         # 3. 清洗数据
         st.write("🧹 正在标准化 CSV 结构...")
         df = clean_sql_response(raw_text)
         
         if df.empty:
-            st.warning("查询结果为空。请检查该时间段内是否有 appsflyer_master_data 数据。")
-            status.update(label="⚠️ 无数据", state="error")
+            st.warning("清洗后的 DataFrame 为空。")
+            st.info("💡 请检查上面的【原始响应快照】。如果快照里只有表头没有数据，说明 SQL 条件未匹配。")
+            status.update(label="⚠️ 无有效数据", state="error")
             st.stop()
 
-        # 4. 字段核对 (防御 KeyError)
+        # 4. 字段核对
         cols = df.columns.tolist()
         required = ['Cost', 'IAP Revenue', 'Ad Revenue']
         missing = [c for c in required if c not in cols]
         
         if missing:
-            st.error(f"无法找到关键列: {missing}")
-            st.write("当前返回的所有列为:", cols)
-            status.update(label="❌ 字段解析冲突", state="error")
+            st.error(f"字段缺失: {missing}")
+            st.write("实际返回列:", cols)
+            status.update(label="❌ 字段冲突", state="error")
             st.stop()
 
         status.update(label="✅ 归因分析完成", state="complete", expanded=False)
@@ -68,7 +76,6 @@ if st.button("🚀 执行同步与归因分析", use_container_width=True):
     # --- 结果展示 ---
     st.divider()
     
-    # 顶部指标卡
     total_cost = df['Cost'].sum()
     total_iap = df['IAP Revenue'].sum()
     total_ad = df['Ad Revenue'].sum()
@@ -78,14 +85,8 @@ if st.button("🚀 执行同步与归因分析", use_container_width=True):
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("总消耗 (Cost)", f"${total_cost:,.2f}")
     c2.metric("总营收 (IAP+Ad)", f"${total_rev:,.2f}")
-    c3.metric("整体 ROI", f"{roi:.2%}", delta=f"{roi-1:.2%}")
-    c4.metric("广告营收占比", f"{(total_ad/total_rev):.1%}" if total_rev > 0 else "0%")
+    c3.metric("整体 ROI", f"{roi:.2%}")
+    c4.metric("广告占比", f"{(total_ad/total_rev):.1%}" if total_rev > 0 else "0%")
 
-    # 详情表格
-    st.subheader("📋 投放明细 (按日期和消耗排序)")
+    st.subheader("📋 投放明细")
     st.dataframe(df, use_container_width=True, hide_index=True)
-    
-    # 简单可视化
-    st.subheader("📈 趋势分析")
-    trend_df = df.groupby('Date')[['Cost', 'IAP Revenue', 'Ad Revenue']].sum()
-    st.line_chart(trend_df)
