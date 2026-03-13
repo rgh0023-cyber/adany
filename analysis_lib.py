@@ -1,13 +1,68 @@
 class AdAnalysis:
     @staticmethod
+    def get_absolute_summary_sql(project_id, start_date, end_date):
+        """
+        全量汇总 SQL：不分层级、不关联字典，确保数据 100% 完整。
+        用于核对项目总账。
+        """
+        return f"""
+/* sessionProperties: {"ignore_downstream_preferences":"true"} */
+SELECT * FROM (
+    SELECT 
+        '全量汇总 (真值)' AS "Date",
+        'Total' AS "Dimension Value",
+        'All Channels' AS "Media Source",
+        'All' AS "OS",
+        SUM(cost_val) AS "Cost",
+        SUM(plot_uv) AS "Plot UV",
+        -- 填充空列以保持 clean_sql_response 兼容性
+        0 AS "ECPM_Null", 0 AS "ECPM_0_100", 0 AS "ECPM_100_200", 
+        0 AS "ECPM_200_300", 0 AS "ECPM_300_400", 0 AS "ECPM_400_500", 0 AS "ECPM_500+",
+        0 AS "L10 UV", 0 AS "L20 UV", 0 AS "L30 UV", 0 AS "L40 UV", 0 AS "L50 UV",
+        0 AS "L60 UV", 0 AS "L70 UV", 0 AS "L80 UV", 0 AS "L90 UV", 0 AS "L100 UV",
+        SUM(iap_uv) AS "IAP UV",
+        0 AS "IAP Times",
+        SUM(iap_rev) AS "IAP Revenue",
+        SUM(ad_uv) AS "Ad UV",
+        SUM(ad_rev) AS "Ad Revenue",
+        SUM(cost_val) AS "total_amount",
+        1 AS "group_num_0",
+        1 AS "group_num"
+    FROM (
+        -- 1. 原始消耗：直接读取，不挂载任何维度限制
+        SELECT 
+            CAST(cost AS DOUBLE) as cost_val,
+            0 as plot_uv, 0 as iap_uv, 0 as iap_rev, 0 as ad_uv, 0 as ad_rev
+        FROM v_event_{project_id}
+        WHERE "$part_event" = 'appsflyer_master_data' 
+          AND "$part_date" BETWEEN '{start_date}' AND '{end_date}'
+        
+        UNION ALL
+        
+        -- 2. 全量行为：统计这段时间内产生的全部转化和收入
+        SELECT 
+            0 as cost_val,
+            COUNT(DISTINCT IF("$part_event" = 'first_finish_plot', "#user_id")) as plot_uv,
+            COUNT(DISTINCT IF("$part_event" = 'iap_recharge_succeed', "#user_id")) as iap_uv,
+            SUM(CAST(IF("$part_event" = 'iap_recharge_succeed', iap_product_currency) AS DOUBLE))/100*0.7 as iap_rev,
+            COUNT(DISTINCT IF("$part_event" = 'applovin_ad_revenue_impression_level', "#user_id")) as ad_uv,
+            SUM(CAST(IF("$part_event" = 'applovin_ad_revenue_impression_level' AND ad_format IN ('REWARDED','INTER'), revenue) AS DOUBLE)) as ad_rev
+        FROM v_event_{project_id}
+        WHERE "$part_event" IN ('first_finish_plot', 'iap_recharge_succeed', 'applovin_ad_revenue_impression_level')
+          AND "$part_date" BETWEEN '{start_date}' AND '{end_date}'
+    )
+)
+"""
+
+    @staticmethod
     def get_advertising_report_sql(project_id, start_date, end_date, dimension="campaign_name"):
         """
-        修正版：显式使用 ad_group_name 字段
+        多维归因 SQL：基于 te_ads_object 字典进行匹配。
         """
-        # 建立 UI 选项与数数物理字段的映射
+        # 物理字段名映射
         field_mapping = {
             "campaign_name": "campaign_name",
-            "adgroup_name": "ad_group_name", # 修正为带下划线的字段
+            "adgroup_name": "ad_group_name", 
             "ad_name": "ad_name"
         }
         
@@ -66,6 +121,7 @@ SELECT * FROM (
                 arbitrary(internal_amount_22) internal_amount_22, arbitrary(internal_amount_23) internal_amount_23,
                 array_agg(os_val) FILTER (WHERE os_val IS NOT NULL) as all_os
             FROM (
+                -- 消耗数据
                 SELECT 
                     CASE 
                         WHEN "te_ads_object" IS NULL THEN '自然量'
@@ -90,7 +146,10 @@ SELECT * FROM (
                 WHERE "$part_event" = 'appsflyer_master_data' 
                   AND "$part_date" BETWEEN '<<START_DATE>>' AND '<<END_DATE>>'
                 GROUP BY 1, 2, 3
+                
                 UNION ALL
+                
+                -- 用户行为数据
                 SELECT 
                     ta_u.group_0,
                     ta_u.media_source,
