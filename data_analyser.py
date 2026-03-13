@@ -5,46 +5,69 @@ class DataAnalyser:
     @staticmethod
     def perform_business_analysis(df_raw):
         """
-        分析部门核心逻辑：在这里定义所有的业务指标计算
+        分析层：基于 Cohort 逻辑的指标加工
         """
         if df_raw.empty:
             return df_raw
         
-        # 1. 深度拷贝，避免影响原始数据
         df = df_raw.copy()
         
-        # 2. 字段类型强制转换 (确保所有指标列都是数值型)
-        numeric_cols = ['Cost', 'IAP Revenue', 'Ad Revenue', 'Plot UV', 'IAP UV']
+        # 1. 强制数值化
+        numeric_cols = [c for c in df.columns if any(x in c for x in ['UV', 'Revenue', 'Cost', 'ECPM', 'L', 'Times'])]
         for col in numeric_cols:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-        
-        # 3. 计算业务核心指标
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            
+        # 2. 核心定义计算
         df['Total Revenue'] = df['IAP Revenue'] + df['Ad Revenue']
         
-        # 计算 ROI (处理分母为 0 的情况)
-        df['ROI'] = df.apply(lambda x: x['Total Revenue'] / x['Cost'] if x['Cost'] > 0 else 0, axis=1)
+        # ROI 计算 (避免除以0)
+        df['ROI'] = (df['Total Revenue'] / df['Cost']).replace([np.inf, -np.inf], 0).fillna(0)
         
-        # 计算单价 (CPI/CPA) - 以 Plot UV 为转化点
-        df['CPA_Plot'] = df.apply(lambda x: x['Cost'] / x['Plot UV'] if x['Plot UV'] > 0 else 0, axis=1)
+        # 总转化成本 (CPA) -> 每一记 Plot UV 的成本
+        df['CPA_Plot'] = (df['Cost'] / df['Plot UV']).replace([np.inf, -np.inf], 0).fillna(0)
         
-        # 计算 ARPU
-        df['ARPU'] = df.apply(lambda x: x['Total Revenue'] / x['Plot UV'] if x['Plot UV'] > 0 else 0, axis=1)
-
-        # 4. 数据高亮逻辑 (比如 ROI < 100% 标记为预警)
-        # 这里可以根据你的需求增加更多的列
+        # IAP 转化成本 (CPP) -> 每一个付费用户的获取成本
+        df['CPP_Pay'] = (df['Cost'] / df['IAP UV']).replace([np.inf, -np.inf], 0).fillna(0)
+        
+        # 3. 辅助质量指标 (Cohort 深度)
+        # 高价值用户占比 (ECPM > 300)
+        high_value_sum = df['ECPM_300_400'] + df['ECPM_400_500'] + df['ECPM_500+']
+        df['HV_Rate'] = (high_value_sum / df['Plot UV']).replace([np.inf, -np.inf], 0).fillna(0)
+        
+        # 付费率 (PUR)
+        df['PUR'] = (df['IAP UV'] / df['Plot UV']).replace([np.inf, -np.inf], 0).fillna(0)
+        
+        # 4. 状态评分逻辑
+        def get_status(row):
+            if row['Cost'] < 30: return "⚪ 样本不足"
+            if row['ROI'] >= 1.0: return "🟢 盈利"
+            if row['ROI'] >= 0.8: return "🟡 回本边缘"
+            return "🔴 亏损"
+        
+        df['Status'] = df.apply(get_status, axis=1)
         
         return df
 
     @staticmethod
-    def get_analysis_summary(df_analysed):
+    def get_summary_metrics(df_analysed):
         """
-        生成分析结论概览
+        生成顶部汇总卡片的核心数值
         """
-        summary = {
-            "总消耗": df_analysed['Cost'].sum(),
-            "总营收": df_analysed['Total Revenue'].sum(),
-            "综合ROI": df_analysed['Total Revenue'].sum() / df_analysed['Cost'].sum() if df_analysed['Cost'].sum() > 0 else 0,
-            "总转化数": df_analysed['Plot UV'].sum()
+        if df_analysed.empty: return {}
+        
+        total_cost = df_analysed['Cost'].sum()
+        total_iap_rev = df_analysed['IAP Revenue'].sum()
+        total_ad_rev = df_analysed['Ad Revenue'].sum()
+        total_rev = total_iap_rev + total_ad_rev
+        total_plot = df_analysed['Plot UV'].sum()
+        total_iap_uv = df_analysed['IAP UV'].sum()
+        
+        return {
+            "总消耗": total_cost,
+            "总营收": total_rev,
+            "综合 ROI": total_rev / total_cost if total_cost > 0 else 0,
+            "总转化成本": total_cost / total_plot if total_plot > 0 else 0,
+            "IAP UV 总数": total_iap_uv,
+            "IAP 转化成本": total_cost / total_iap_uv if total_iap_uv > 0 else 0,
+            "内购占比": total_iap_rev / total_rev if total_rev > 0 else 0
         }
-        return summary
