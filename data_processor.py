@@ -3,60 +3,43 @@ import io
 import re
 
 def clean_sql_response(raw_text):
-    """
-    终极鲁棒解析器：自动校准缺失表头、处理脏字符及列名映射
-    """
     if not raw_text or len(raw_text.strip()) == 0:
         return pd.DataFrame()
 
     try:
-        # 1. 处理 BOM 头
-        raw_text = raw_text.encode('utf-8').decode('utf-8-sig')
+        content = raw_text.encode('utf-8').decode('utf-8-sig').strip()
         
-        # 2. 预读：检查第一行是否包含业务关键词。如果不包含，说明可能丢失了表头
-        lines = raw_text.strip().split('\n')
-        header_line = lines[0]
-        
-        # 定义我们期望看到的标准列名顺序（对应你 SQL 里的 Select 顺序）
-        standard_cols = [
+        # 定义 SQL 严格的物理列顺序 (核心防御)
+        expected_cols = [
             'Date', 'Campaign Name', 'OS', 'Cost', 'Plot UV', 
-            'ECPM_Null', 'ECPM_0_100', 'ECPM_100_200', 'ECPM_100_200', # 对应 SQL 结构
+            'ECPM_Null', 'ECPM_0_100', 'ECPM_100_200', 'ECPM_199_200_alt',
             'ECPM_200_300', 'ECPM_300_400', 'ECPM_400_500', 'ECPM_500+',
             'L10 UV', 'L20 UV', 'L30 UV', 'L40 UV', 'L50 UV', 'L60 UV', 'L70 UV', 'L80 UV', 'L90 UV', 'L100 UV',
-            'IAP UV', 'IAP Times', 'IAP Revenue', 'Ad UV', 'Ad Revenue', 'total_amount'
+            'IAP UV', 'IAP Times', 'IAP Revenue', 'Ad UV', 'Ad Revenue', 'total_amount', 'group_num_0', 'group_num'
         ]
 
-        # 如果第一行看起来像数据（例如包含逗号但没有 "Campaign" 或 "Date" 字样）
-        if 'Date' not in header_line and 'Campaign' not in header_line:
-            # 强制把当前第一行也当做数据读入，并手动指定列名
-            df = pd.read_csv(io.StringIO(raw_text), header=None)
-            # 仅映射前 N 列（防止 SQL 返回列数与定义不符）
-            df.columns = standard_cols[:len(df.columns)]
+        # 尝试读取
+        df = pd.read_csv(io.StringIO(content), quotechar='"', skipinitialspace=True)
+        
+        # 如果第一列看起来像日期（数据）而不是字符串"Date"，判定表头丢失
+        first_val = str(df.columns[0])
+        if not re.search(r'[a-zA-Z]', first_val) or (re.match(r'\d{4}-\d{2}-\d{2}', first_val)):
+            df = pd.read_csv(io.StringIO(content), header=None, quotechar='"')
+            df.columns = expected_cols[:len(df.columns)]
         else:
-            # 正常读取
-            df = pd.read_csv(io.StringIO(raw_text), quotechar='"', skipinitialspace=True)
-        
-        # 3. 彻底清洗列名特殊字符
-        df.columns = [re.sub(r'["\'\r\n\t]', '', str(c)).strip() for c in df.columns]
-        
-        # 4. 关键字段对齐映射（再次兜底）
-        mapping = {
-            'Cost': ['Cost', 'cost', 'internal_amount_0'],
-            'IAP Revenue': ['IAP Revenue', 'iap_revenue', 'internal_amount_7'],
-            'Ad Revenue': ['Ad Revenue', 'ad_revenue', 'internal_amount_5']
-        }
-        for std_name, aliases in mapping.items():
+            df.columns = [re.sub(r'["\'\r\n\t]', '', str(c)).strip() for c in df.columns]
+
+        # 别名二次对齐
+        mapping = {'Cost':['internal_amount_0'], 'IAP Revenue':['internal_amount_7'], 'Ad Revenue':['internal_amount_5']}
+        for std, aliases in mapping.items():
             for col in df.columns:
                 if col in aliases:
-                    df = df.rename(columns={col: std_name})
-                    break
-
-        # 5. 类型强制转换
-        for col in ['Cost', 'IAP Revenue', 'Ad Revenue']:
+                    df = df.rename(columns={col: std})
+        
+        # 数值转换
+        for col in ['Cost', 'IAP Revenue', 'Ad Revenue', 'Plot UV']:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
-                
         return df
-    except Exception as e:
-        print(f"Data Processor Error: {e}")
+    except:
         return pd.DataFrame()
