@@ -14,3 +14,5 @@ plotly>=5.18.0
 
 # 处理日期时间（如果需要更复杂的计算）
 python-dateutil>=2.8.2
+
+matplotlib
