@@ -1,16 +1,139 @@
 class AdAnalysis:
     @staticmethod
-    def get_level_start_sql(project_id, start_date, end_date):
-        # 封装你提供的复杂 SQL，并参数化日期
-        return f"""
-        select * from (select *,count(data_map_0) over () group_num_0,count(1) over () group_num from (select map_agg(if(amount_0 is not null and is_finite(amount_0) , "$__Date_Time", null), amount_0) data_map_0,sum(if(is_finite(amount_0) and ("$__Date_Time" <> timestamp '1981-01-01'), amount_0, 0)) total_amount from (select *, internal_amount_0 amount_0 from (select "$__Date_Time",cast(coalesce(COUNT(DISTINCT ta_ev."#user_id"), 0) as double) internal_amount_0 from (select *, ta_date_trunc('day',"@vpc_tz_#event_time", 1) "$__Date_Time" from (SELECT * from (select *, if("$etz" is not null and "$etz">=-30 and "$etz"<=30, date_add('second', cast((-8-"$etz")*3600 as integer), "#event_time"), "#event_time") "@vpc_tz_#event_time" from (select *, if("$stz" = -100, "#zone_offset", "$stz") "$etz" from (select "#event_name" "#event_name","#event_time" "#event_time","#user_id" "#user_id","#zone_offset" "#zone_offset","$part_date" "$part_date","$part_event" "$part_event",-100 "$stz" from (select "#user_id", "#event_time" "#event_time","$part_event" "$part_event","#zone_offset" "#zone_offset","$part_date" "$part_date","#event_name" "#event_name" from v_event_{project_id} where "$part_event" in ('level_start'))))))) ta_ev where (( ( "$part_event" IN ( 'level_start' ) ) )) and (("$part_date" between '{start_date}' and '{end_date}') and ("@vpc_tz_#event_time" >= timestamp '{start_date}' and "@vpc_tz_#event_time" < date_add('day', 1, TIMESTAMP '{end_date}'))) group by "$__Date_Time")))) ORDER BY total_amount DESC limit 1000
+    def get_advertising_report_sql(project_id, start_date, end_date):
         """
-
-    @staticmethod
-    def calculate_metrics(df):
-        if df.empty: return {}
-        return {
-            "total": df['value'].sum(),
-            "avg": df['value'].mean(),
-            "max": df['value'].max()
-        }
+        真实的投放归因 SQL 模板
+        """
+        return f"""
+        /* sessionProperties: {{"ignore_downstream_preferences":"true"}} */
+        SELECT * FROM (
+            SELECT *,
+                count("Cost") OVER () group_num_0,
+                count(1) OVER () group_num 
+            FROM (
+                SELECT 
+                    format_datetime("$__Date_Time", 'yyyy-MM-dd') AS "Date",
+                    group_0 AS "Campaign Name",
+                    array_join(array_distinct(all_os), ', ') AS "OS",
+                    internal_amount_0 AS "Cost", 
+                    internal_amount_1 AS "Plot UV", 
+                    internal_amount_16 AS "ECPM_Null",
+                    internal_amount_17 AS "ECPM_0_100",
+                    internal_amount_18 AS "ECPM_100_200",
+                    internal_amount_19 AS "ECPM_200_300",
+                    internal_amount_20 AS "ECPM_300_400",
+                    internal_amount_21 AS "ECPM_400_500",
+                    internal_amount_22 AS "ECPM_500+",
+                    internal_amount_2 AS "L10 UV", internal_amount_3 AS "L20 UV",
+                    internal_amount_8 AS "L30 UV", internal_amount_9 AS "L40 UV",
+                    internal_amount_10 AS "L50 UV", internal_amount_11 AS "L60 UV",
+                    internal_amount_12 AS "L70 UV", internal_amount_13 AS "L80 UV",
+                    internal_amount_14 AS "L90 UV", internal_amount_15 AS "L100 UV",
+                    internal_amount_6 AS "IAP UV", 
+                    internal_amount_23 AS "IAP Times", 
+                    CAST(coalesce(internal_amount_7, 0) AS DOUBLE)/100*0.7 AS "IAP Revenue",
+                    internal_amount_4 AS "Ad UV", 
+                    internal_amount_5 AS "Ad Revenue", 
+                    sum(IF(is_finite(internal_amount_0), internal_amount_0, 0)) OVER (PARTITION BY "$__Date_Time", group_0) as total_amount
+                FROM (
+                    SELECT group_0, "$__Date_Time",
+                        arbitrary(internal_amount_0) internal_amount_0, arbitrary(internal_amount_1) internal_amount_1,
+                        arbitrary(internal_amount_2) internal_amount_2, arbitrary(internal_amount_3) internal_amount_3,
+                        arbitrary(internal_amount_4) internal_amount_4, arbitrary(internal_amount_5) internal_amount_5,
+                        arbitrary(internal_amount_6) internal_amount_6, arbitrary(internal_amount_7) internal_amount_7,
+                        arbitrary(internal_amount_8) internal_amount_8, arbitrary(internal_amount_9) internal_amount_9,
+                        arbitrary(internal_amount_10) internal_amount_10, arbitrary(internal_amount_11) internal_amount_11,
+                        arbitrary(internal_amount_12) internal_amount_12, arbitrary(internal_amount_13) internal_amount_13,
+                        arbitrary(internal_amount_14) internal_amount_14, arbitrary(internal_amount_15) internal_amount_15,
+                        arbitrary(internal_amount_16) internal_amount_16, arbitrary(internal_amount_17) internal_amount_17,
+                        arbitrary(internal_amount_18) internal_amount_18, arbitrary(internal_amount_19) internal_amount_19,
+                        arbitrary(internal_amount_20) internal_amount_20, arbitrary(internal_amount_21) internal_amount_21,
+                        arbitrary(internal_amount_22) internal_amount_22, arbitrary(internal_amount_23) internal_amount_23,
+                        array_agg(os_val) FILTER (WHERE os_val IS NOT NULL) as all_os
+                    FROM (
+                        SELECT 
+                            CASE 
+                                WHEN "te_ads_object" IS NULL THEN '自然量'
+                                WHEN "te_ads_object"."campaign_name" IS NULL THEN '自然量'
+                                WHEN "te_ads_object"."campaign_name" = '-' THEN '自然量'
+                                ELSE "te_ads_object"."campaign_name" 
+                            END AS group_0,
+                            ta_date_trunc('day', "#event_time", 1) AS "$__Date_Time",
+                            CAST(coalesce(SUM(CAST(cost AS DOUBLE)), 0) AS DOUBLE) internal_amount_0,
+                            NULL internal_amount_1, NULL internal_amount_2, NULL internal_amount_3, 
+                            NULL internal_amount_4, NULL internal_amount_5, NULL internal_amount_6, NULL internal_amount_7,
+                            NULL internal_amount_8, NULL internal_amount_9, NULL internal_amount_10, NULL internal_amount_11,
+                            NULL internal_amount_12, NULL internal_amount_13, NULL internal_amount_14, NULL internal_amount_15,
+                            NULL internal_amount_16, NULL internal_amount_17, NULL internal_amount_18, NULL internal_amount_19,
+                            NULL internal_amount_20, NULL internal_amount_21, NULL internal_amount_22, NULL internal_amount_23,
+                            NULL as os_val
+                        FROM v_event_{project_id} 
+                        WHERE "$part_event" = 'appsflyer_master_data' 
+                          AND "$part_date" BETWEEN '{start_date}' AND '{end_date}'
+                        GROUP BY 1, 2
+                        UNION ALL
+                        SELECT 
+                            ta_u.group_0,
+                            ta_date_trunc('day', ta_u.inst_t, 1) AS "$__Date_Time",
+                            NULL internal_amount_0,
+                            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'first_finish_plot', ta_ev."#user_id"))) AS DOUBLE) internal_amount_1,
+                            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '10', ta_ev."#user_id"))) AS DOUBLE) internal_amount_2,
+                            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '20', ta_ev."#user_id"))) AS DOUBLE) internal_amount_3,
+                            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'applovin_ad_revenue_impression_level' AND ta_ev.ad_format IN ('REWARDED','INTER'), ta_ev."#user_id"))) AS DOUBLE) internal_amount_4,
+                            CAST(SUM(CAST(IF(ta_ev."$part_event" = 'applovin_ad_revenue_impression_level' AND ta_ev.ad_format IN ('REWARDED','INTER'), ta_ev.revenue) AS DOUBLE)) AS DOUBLE) internal_amount_5,
+                            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'iap_recharge_succeed', ta_ev."#user_id"))) AS DOUBLE) internal_amount_6,
+                            CAST(SUM(CAST(IF(ta_ev."$part_event" = 'iap_recharge_succeed', ta_ev.iap_product_currency) AS DOUBLE)) AS DOUBLE) internal_amount_7,
+                            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '30', ta_ev."#user_id"))) AS DOUBLE) internal_amount_8,
+                            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '40', ta_ev."#user_id"))) AS DOUBLE) internal_amount_9,
+                            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '50', ta_ev."#user_id"))) AS DOUBLE) internal_amount_10,
+                            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '60', ta_ev."#user_id"))) AS DOUBLE) internal_amount_11,
+                            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '70', ta_ev."#user_id"))) AS DOUBLE) internal_amount_12,
+                            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '80', ta_ev."#user_id"))) AS DOUBLE) internal_amount_13,
+                            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '90', ta_ev."#user_id"))) AS DOUBLE) internal_amount_14,
+                            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '100', ta_ev."#user_id"))) AS DOUBLE) internal_amount_15,
+                            CAST(COUNT(DISTINCT (IF(ta_u.ecpm IS NULL, ta_ev."#user_id"))) AS DOUBLE) internal_amount_16,
+                            CAST(COUNT(DISTINCT (IF(ta_u.ecpm >= 0 AND ta_u.ecpm < 100, ta_ev."#user_id"))) AS DOUBLE) internal_amount_17,
+                            CAST(COUNT(DISTINCT (IF(ta_u.ecpm >= 100 AND ta_u.ecpm < 200, ta_ev."#user_id"))) AS DOUBLE) internal_amount_18,
+                            CAST(COUNT(DISTINCT (IF(ta_u.ecpm >= 200 AND ta_u.ecpm < 300, ta_ev."#user_id"))) AS DOUBLE) internal_amount_19,
+                            CAST(COUNT(DISTINCT (IF(ta_u.ecpm >= 300 AND ta_u.ecpm < 400, ta_ev."#user_id"))) AS DOUBLE) internal_amount_20,
+                            CAST(COUNT(DISTINCT (IF(ta_u.ecpm >= 400 AND ta_u.ecpm < 500, ta_ev."#user_id"))) AS DOUBLE) internal_amount_21,
+                            CAST(COUNT(DISTINCT (IF(ta_u.ecpm >= 500, ta_ev."#user_id"))) AS DOUBLE) internal_amount_22,
+                            CAST(COUNT(IF(ta_ev."$part_event" = 'iap_recharge_succeed', 1)) AS DOUBLE) internal_amount_23,
+                            arbitrary(ta_u.os_val) as os_val
+                        FROM (
+                            SELECT "#user_id", "$part_event", "level_id", "ad_format", "revenue", "iap_product_currency", "#app_version"
+                            FROM v_event_{project_id} 
+                            WHERE "$part_event" IN ('first_finish_plot', 'level_start', 'applovin_ad_revenue_impression_level', 'iap_recharge_succeed')
+                              AND "$part_date" BETWEEN '{start_date}' AND '{end_date}'
+                        ) ta_ev 
+                        INNER JOIN (
+                            SELECT 
+                                ev."#user_id", 
+                                CASE 
+                                    WHEN u."te_ads_object" IS NULL THEN '自然量'
+                                    WHEN u."te_ads_object"."campaign_name" IS NULL THEN '自然量'
+                                    WHEN u."te_ads_object"."campaign_name" = '-' THEN '自然量'
+                                    ELSE u."te_ads_object"."campaign_name" 
+                                END AS group_0, 
+                                u."app_version_first" AS v_first,
+                                min(ev."#event_time") AS inst_t, 
+                                arbitrary(ev."#os") as os_val,
+                                arbitrary(u.first_rv_ecpm) as ecpm
+                            FROM v_event_{project_id} ev
+                            LEFT JOIN v_user_{project_id} u ON ev."#user_id" = u."#user_id"
+                            WHERE ev."$part_event" = 'first_finish_plot'
+                              AND ev."$part_date" BETWEEN '{start_date}' AND '{end_date}'
+                            GROUP BY 1, 2, 3
+                        ) ta_u ON ta_ev."#user_id" = ta_u."#user_id"
+                        WHERE ta_ev."#app_version" = ta_u.v_first
+                        GROUP BY 1, 2
+                    ) 
+                    WHERE "$__Date_Time" >= TIMESTAMP '{start_date}' AND "$__Date_Time" < date_add('day', 1, TIMESTAMP '{end_date}')
+                    GROUP BY group_0, "$__Date_Time"
+                )
+                WHERE (internal_amount_0 > 0 OR internal_amount_1 > 0)
+            )
+        ) 
+        ORDER BY "Date" DESC, total_amount DESC 
+        LIMIT 1000
+        """
