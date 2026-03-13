@@ -3,10 +3,11 @@ class AdAnalysis:
     def get_advertising_report_sql(project_id, start_date, end_date):
         """
         投放归因 SQL 模板。
-        注意：Python f-string 需要用 {{ 和 }} 来表示 SQL 里的原始大括号。
+        使用 .replace 替换变量，彻底避免 Python f-string 对 SQL 内部大括号的干扰。
         """
-        return f"""
-/* sessionProperties: {{"ignore_downstream_preferences":"true"}} */
+        # 定义原始 SQL 模板，注意：SQL 内部的 { } 保持原样，无需双写
+        template = """
+/* sessionProperties: {"ignore_downstream_preferences":"true"} */
 SELECT * FROM (
     SELECT *,
         count("Cost") OVER () group_num_0,
@@ -52,6 +53,7 @@ SELECT * FROM (
                 arbitrary(internal_amount_22) internal_amount_22, arbitrary(internal_amount_23) internal_amount_23,
                 array_agg(os_val) FILTER (WHERE os_val IS NOT NULL) as all_os
             FROM (
+                /* 模块 A: Cost 数据 */
                 SELECT 
                     CASE 
                         WHEN "te_ads_object" IS NULL THEN '自然量'
@@ -68,11 +70,14 @@ SELECT * FROM (
                     NULL internal_amount_16, NULL internal_amount_17, NULL internal_amount_18, NULL internal_amount_19,
                     NULL internal_amount_20, NULL internal_amount_21, NULL internal_amount_22, NULL internal_amount_23,
                     NULL as os_val
-                FROM v_event_{project_id} 
+                FROM v_event_<<PROJECT_ID>> 
                 WHERE "$part_event" = 'appsflyer_master_data' 
-                  AND "$part_date" BETWEEN '{start_date}' AND '{end_date}'
+                  AND "$part_date" BETWEEN '<<START_DATE>>' AND '<<END_DATE>>'
                 GROUP BY 1, 2
+
                 UNION ALL
+
+                /* 模块 B: 用户行为归因 */
                 SELECT 
                     ta_u.group_0,
                     ta_date_trunc('day', ta_u.inst_t, 1) AS "$__Date_Time",
@@ -103,9 +108,9 @@ SELECT * FROM (
                     arbitrary(ta_u.os_val) as os_val
                 FROM (
                     SELECT "#user_id", "$part_event", "level_id", "ad_format", "revenue", "iap_product_currency", "#app_version"
-                    FROM v_event_{project_id} 
+                    FROM v_event_<<PROJECT_ID>> 
                     WHERE "$part_event" IN ('first_finish_plot', 'level_start', 'applovin_ad_revenue_impression_level', 'iap_recharge_succeed')
-                      AND "$part_date" BETWEEN '{start_date}' AND '{end_date}'
+                      AND "$part_date" BETWEEN '<<START_DATE>>' AND '<<END_DATE>>'
                 ) ta_ev 
                 INNER JOIN (
                     SELECT 
@@ -120,16 +125,16 @@ SELECT * FROM (
                         min(ev."#event_time") AS inst_t, 
                         arbitrary(ev."#os") as os_val,
                         arbitrary(u.first_rv_ecpm) as ecpm
-                    FROM v_event_{project_id} ev
-                    LEFT JOIN v_user_{project_id} u ON ev."#user_id" = u."#user_id"
+                    FROM v_event_<<PROJECT_ID>> ev
+                    LEFT JOIN v_user_<<PROJECT_ID>> u ON ev."#user_id" = u."#user_id"
                     WHERE ev."$part_event" = 'first_finish_plot'
-                      AND ev."$part_date" BETWEEN '{start_date}' AND '{end_date}'
+                      AND ev."$part_date" BETWEEN '<<START_DATE>>' AND '<<END_DATE>>'
                     GROUP BY 1, 2, 3
                 ) ta_u ON ta_ev."#user_id" = ta_u."#user_id"
                 WHERE ta_ev."#app_version" = ta_u.v_first
                 GROUP BY 1, 2
             ) 
-            WHERE "$__Date_Time" >= TIMESTAMP '{start_date}' AND "$__Date_Time" < date_add('day', 1, TIMESTAMP '{end_date}')
+            WHERE "$__Date_Time" >= TIMESTAMP '<<START_DATE>>' AND "$__Date_Time" < date_add('day', 1, TIMESTAMP '<<END_DATE>>')
             GROUP BY group_0, "$__Date_Time"
         )
         WHERE (internal_amount_0 > 0 OR internal_amount_1 > 0)
@@ -138,3 +143,9 @@ SELECT * FROM (
 ORDER BY "Date" DESC, total_amount DESC 
 LIMIT 1000
 """
+        # 执行变量替换
+        sql = template.replace("<<PROJECT_ID>>", str(project_id))
+        sql = sql.replace("<<START_DATE>>", start_date)
+        sql = sql.replace("<<END_DATE>>", end_date)
+        
+        return sql
