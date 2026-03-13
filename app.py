@@ -42,7 +42,6 @@ if st.button("🚀 执行多维分析", use_container_width=True):
     with st.spinner("正在获取数据..."):
         client = TAClient(api_url, token)
         
-        # 分支选择 SQL
         if dim_choice == "全量汇总":
             sql = AdAnalysis.get_absolute_summary_sql(project_id, start_s, end_s)
         else:
@@ -65,16 +64,16 @@ if st.button("🚀 执行多维分析", use_container_width=True):
         total_rev = total_iap + total_ad
         
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("消耗", f"${total_cost:,.2f}")
-        c2.metric("营收", f"${total_rev:,.2f}")
-        c3.metric("ROI", f"{(total_rev/total_cost):.2%}" if total_cost > 0 else "0%")
+        c1.metric("总消耗", f"${total_cost:,.2f}")
+        c2.metric("总营收", f"${total_rev:,.2f}")
+        c3.metric("整体 ROI", f"{(total_rev/total_cost):.2%}" if total_cost > 0 else "0%")
         c4.metric("Plot UV", f"{int(df['Plot UV'].sum()):,}")
 
         st.divider()
         if dim_choice == "全量汇总":
-            st.subheader("📊 项目大盘汇总 (100% 完整)")
-            # 汇总模式只显示核心列，且渠道应该为空
-            summary_display = ['Dimension Value', 'Media Source', 'Cost', 'IAP Revenue', 'Ad Revenue', 'Plot UV']
+            st.subheader("📊 项目按天汇总 (100% 完整)")
+            # 汇总模式显示日期和核心指标
+            summary_display = ['Date', 'Dimension Value', 'Cost', 'IAP Revenue', 'Ad Revenue', 'Plot UV']
             st.dataframe(df[summary_display], use_container_width=True, hide_index=True)
         else:
             st.subheader(f"📑 {dim_choice} 归因明细")
