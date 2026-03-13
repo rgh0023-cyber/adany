@@ -2,19 +2,14 @@ class AdAnalysis:
     @staticmethod
     def get_advertising_report_sql(project_id, start_date, end_date, dimension="campaign_name"):
         """
-        修复版：解决 Column 'te_ads_object' is ambiguous 错误。
-        dimension 支持: 'campaign_name', 'adgroup_name', 'ad_name'
+        严格仅替换维度字段的 SQL 逻辑。
+        dimension 取值：campaign_name, adgroup_name, ad_name
         """
-        # 映射维度字段，显式指定表别名 u 或直接引用
-        dim_map = {
-            "campaign_name": 'u."te_ads_object"."campaign_name"',
-            "adgroup_name": 'u."te_ads_object"."adgroup_name"',
-            "ad_name": 'u."te_ads_object"."ad_name"'
-        }
-        dim_field_with_alias = dim_map.get(dimension, 'u."te_ads_object"."campaign_name"')
         
-        # 对于第一个子查询（appsflyer_master_data），它是单表查询，不需要 u. 前缀
-        dim_field_raw = dim_field_with_alias.replace('u.', '')
+        # 针对消耗数据（单表查询）的字段
+        dim_raw = f'"te_ads_object"."{dimension}"'
+        # 针对用户行为数据（JOIN 查询）的字段，必须带 u. 前缀以防歧义
+        dim_with_u = f'u."te_ads_object"."{dimension}"'
 
         template = """
 /* sessionProperties: {"ignore_downstream_preferences":"true"} */
@@ -64,12 +59,11 @@ SELECT * FROM (
                 arbitrary(internal_amount_22) internal_amount_22, arbitrary(internal_amount_23) internal_amount_23,
                 array_agg(os_val) FILTER (WHERE os_val IS NOT NULL) as all_os
             FROM (
-                -- 1. 消耗汇总块
+                -- 消耗数据
                 SELECT 
                     CASE 
                         WHEN "te_ads_object" IS NULL THEN '自然量'
                         WHEN <<DIM_RAW>> IS NULL THEN '自然量'
-                        WHEN <<DIM_RAW>> = '-' THEN '自然量'
                         ELSE <<DIM_RAW>> 
                     END AS group_0,
                     CASE 
@@ -90,10 +84,10 @@ SELECT * FROM (
                 WHERE "$part_event" = 'appsflyer_master_data' 
                   AND "$part_date" BETWEEN '<<START_DATE>>' AND '<<END_DATE>>'
                 GROUP BY 1, 2, 3
-
+                
                 UNION ALL
-
-                -- 2. 行为归因块
+                
+                -- 用户行为数据
                 SELECT 
                     ta_u.group_0,
                     ta_u.media_source,
@@ -134,9 +128,8 @@ SELECT * FROM (
                         ev."#user_id", 
                         CASE 
                             WHEN u."te_ads_object" IS NULL THEN '自然量'
-                            WHEN <<DIM_FIELD>> IS NULL THEN '自然量'
-                            WHEN <<DIM_FIELD>> = '-' THEN '自然量'
-                            ELSE <<DIM_FIELD>> 
+                            WHEN <<DIM_WITH_U>> IS NULL THEN '自然量'
+                            ELSE <<DIM_WITH_U>> 
                         END AS group_0, 
                         CASE 
                             WHEN u."te_ads_object" IS NULL THEN 'Organic'
@@ -168,6 +161,6 @@ LIMIT 1000
         sql = template.replace("<<PROJECT_ID>>", str(project_id))\
                       .replace("<<START_DATE>>", start_date)\
                       .replace("<<END_DATE>>", end_date)\
-                      .replace("<<DIM_FIELD>>", dim_field_with_alias)\
-                      .replace("<<DIM_RAW>>", dim_field_raw)
+                      .replace("<<DIM_RAW>>", dim_raw)\
+                      .replace("<<DIM_WITH_U>>", dim_with_u)
         return sql
