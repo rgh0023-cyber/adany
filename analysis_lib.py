@@ -1,10 +1,18 @@
 class AdAnalysis:
     @staticmethod
-    def get_advertising_report_sql(project_id, start_date, end_date):
+    def get_advertising_report_sql(project_id, start_date, end_date, dimension="campaign_name"):
         """
         投放归因 SQL 模板。
-        使用 .replace 彻底避免 Python f-string 对 SQL 内部大括号的干扰。
+        dimension 支持: 'campaign_name' (广告计划), 'adgroup_name' (广告组), 'ad_name' (广告创意)
         """
+        # 映射维度字段
+        dim_map = {
+            "campaign_name": '"te_ads_object"."campaign_name"',
+            "adgroup_name": '"te_ads_object"."adgroup_name"',
+            "ad_name": '"te_ads_object"."ad_name"'
+        }
+        dim_field = dim_map.get(dimension, '"te_ads_object"."campaign_name"')
+
         template = """
 /* sessionProperties: {"ignore_downstream_preferences":"true"} */
 SELECT * FROM (
@@ -14,7 +22,8 @@ SELECT * FROM (
     FROM (
         SELECT 
             format_datetime("$__Date_Time", 'yyyy-MM-dd') AS "Date",
-            group_0 AS "Campaign Name",
+            group_0 AS "Dimension Value",
+            media_source AS "Media Source",
             array_join(array_distinct(all_os), ', ') AS "OS",
             internal_amount_0 AS "Cost", 
             internal_amount_1 AS "Plot UV", 
@@ -35,9 +44,9 @@ SELECT * FROM (
             CAST(coalesce(internal_amount_7, 0) AS DOUBLE)/100*0.7 AS "IAP Revenue",
             internal_amount_4 AS "Ad UV", 
             internal_amount_5 AS "Ad Revenue", 
-            sum(IF(is_finite(internal_amount_0), internal_amount_0, 0)) OVER (PARTITION BY "$__Date_Time", group_0) as total_amount
+            sum(IF(is_finite(internal_amount_0), internal_amount_0, 0)) OVER (PARTITION BY "$__Date_Time", group_0, media_source) as total_amount
         FROM (
-            SELECT group_0, "$__Date_Time",
+            SELECT group_0, media_source, "$__Date_Time",
                 arbitrary(internal_amount_0) internal_amount_0, arbitrary(internal_amount_1) internal_amount_1,
                 arbitrary(internal_amount_2) internal_amount_2, arbitrary(internal_amount_3) internal_amount_3,
                 arbitrary(internal_amount_4) internal_amount_4, arbitrary(internal_amount_5) internal_amount_5,
@@ -55,10 +64,15 @@ SELECT * FROM (
                 SELECT 
                     CASE 
                         WHEN "te_ads_object" IS NULL THEN '自然量'
-                        WHEN "te_ads_object"."campaign_name" IS NULL THEN '自然量'
-                        WHEN "te_ads_object"."campaign_name" = '-' THEN '自然量'
-                        ELSE "te_ads_object"."campaign_name" 
+                        WHEN <<DIM_FIELD>> IS NULL THEN '自然量'
+                        WHEN <<DIM_FIELD>> = '-' THEN '自然量'
+                        ELSE <<DIM_FIELD>> 
                     END AS group_0,
+                    CASE 
+                        WHEN "te_ads_object" IS NULL THEN 'Organic'
+                        WHEN "te_ads_object"."media_source" IS NULL THEN 'Organic'
+                        ELSE "te_ads_object"."media_source"
+                    END AS media_source,
                     ta_date_trunc('day', "#event_time", 1) AS "$__Date_Time",
                     CAST(coalesce(SUM(CAST(cost AS DOUBLE)), 0) AS DOUBLE) internal_amount_0,
                     NULL internal_amount_1, NULL internal_amount_2, NULL internal_amount_3, 
@@ -71,10 +85,11 @@ SELECT * FROM (
                 FROM v_event_<<PROJECT_ID>> 
                 WHERE "$part_event" = 'appsflyer_master_data' 
                   AND "$part_date" BETWEEN '<<START_DATE>>' AND '<<END_DATE>>'
-                GROUP BY 1, 2
+                GROUP BY 1, 2, 3
                 UNION ALL
                 SELECT 
                     ta_u.group_0,
+                    ta_u.media_source,
                     ta_date_trunc('day', ta_u.inst_t, 1) AS "$__Date_Time",
                     NULL internal_amount_0,
                     CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'first_finish_plot', ta_ev."#user_id"))) AS DOUBLE) internal_amount_1,
@@ -112,10 +127,15 @@ SELECT * FROM (
                         ev."#user_id", 
                         CASE 
                             WHEN u."te_ads_object" IS NULL THEN '自然量'
-                            WHEN u."te_ads_object"."campaign_name" IS NULL THEN '自然量'
-                            WHEN u."te_ads_object"."campaign_name" = '-' THEN '自然量'
-                            ELSE u."te_ads_object"."campaign_name" 
+                            WHEN <<DIM_FIELD>> IS NULL THEN '自然量'
+                            WHEN <<DIM_FIELD>> = '-' THEN '自然量'
+                            ELSE <<DIM_FIELD>> 
                         END AS group_0, 
+                        CASE 
+                            WHEN u."te_ads_object" IS NULL THEN 'Organic'
+                            WHEN u."te_ads_object"."media_source" IS NULL THEN 'Organic'
+                            ELSE u."te_ads_object"."media_source"
+                        END AS media_source,
                         u."app_version_first" AS v_first,
                         min(ev."#event_time") AS inst_t, 
                         arbitrary(ev."#os") as os_val,
@@ -124,13 +144,13 @@ SELECT * FROM (
                     LEFT JOIN v_user_<<PROJECT_ID>> u ON ev."#user_id" = u."#user_id"
                     WHERE ev."$part_event" = 'first_finish_plot'
                       AND ev."$part_date" BETWEEN '<<START_DATE>>' AND '<<END_DATE>>'
-                    GROUP BY 1, 2, 3
+                    GROUP BY 1, 2, 3, 4
                 ) ta_u ON ta_ev."#user_id" = ta_u."#user_id"
                 WHERE ta_ev."#app_version" = ta_u.v_first
-                GROUP BY 1, 2
+                GROUP BY 1, 2, 3
             ) 
             WHERE "$__Date_Time" >= TIMESTAMP '<<START_DATE>>' AND "$__Date_Time" < date_add('day', 1, TIMESTAMP '<<END_DATE>>')
-            GROUP BY group_0, "$__Date_Time"
+            GROUP BY group_0, media_source, "$__Date_Time"
         )
         WHERE (internal_amount_0 > 0 OR internal_amount_1 > 0)
     )
@@ -138,5 +158,8 @@ SELECT * FROM (
 ORDER BY "Date" DESC, total_amount DESC 
 LIMIT 1000
 """
-        sql = template.replace("<<PROJECT_ID>>", str(project_id)).replace("<<START_DATE>>", start_date).replace("<<END_DATE>>", end_date)
+        sql = template.replace("<<PROJECT_ID>>", str(project_id))\
+                      .replace("<<START_DATE>>", start_date)\
+                      .replace("<<END_DATE>>", end_date)\
+                      .replace("<<DIM_FIELD>>", dim_field)
         return sql
