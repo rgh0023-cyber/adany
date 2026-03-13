@@ -2,14 +2,21 @@ class AdAnalysis:
     @staticmethod
     def get_advertising_report_sql(project_id, start_date, end_date, dimension="campaign_name"):
         """
-        严格仅替换维度字段的 SQL 逻辑。
-        dimension 取值：campaign_name, adgroup_name, ad_name
+        修正版：显式使用 ad_group_name 字段
         """
+        # 建立 UI 选项与数数物理字段的映射
+        field_mapping = {
+            "campaign_name": "campaign_name",
+            "adgroup_name": "ad_group_name", # 修正为带下划线的字段
+            "ad_name": "ad_name"
+        }
         
-        # 针对消耗数据（单表查询）的字段
-        dim_raw = f'"te_ads_object"."{dimension}"'
-        # 针对用户行为数据（JOIN 查询）的字段，必须带 u. 前缀以防歧义
-        dim_with_u = f'u."te_ads_object"."{dimension}"'
+        real_field = field_mapping.get(dimension, dimension)
+        
+        # 针对消耗数据（单表查询）
+        dim_raw = f'"te_ads_object"."{real_field}"'
+        # 针对用户行为数据（JOIN 查询）
+        dim_with_u = f'u."te_ads_object"."{real_field}"'
 
         template = """
 /* sessionProperties: {"ignore_downstream_preferences":"true"} */
@@ -59,7 +66,6 @@ SELECT * FROM (
                 arbitrary(internal_amount_22) internal_amount_22, arbitrary(internal_amount_23) internal_amount_23,
                 array_agg(os_val) FILTER (WHERE os_val IS NOT NULL) as all_os
             FROM (
-                -- 消耗数据
                 SELECT 
                     CASE 
                         WHEN "te_ads_object" IS NULL THEN '自然量'
@@ -84,10 +90,7 @@ SELECT * FROM (
                 WHERE "$part_event" = 'appsflyer_master_data' 
                   AND "$part_date" BETWEEN '<<START_DATE>>' AND '<<END_DATE>>'
                 GROUP BY 1, 2, 3
-                
                 UNION ALL
-                
-                -- 用户行为数据
                 SELECT 
                     ta_u.group_0,
                     ta_u.media_source,
