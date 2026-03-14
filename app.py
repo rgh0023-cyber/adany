@@ -111,7 +111,7 @@ if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
     st.subheader("维度穿透视图")
     view_cols = [
         'Date', 'OS', 'Dimension Value', 'Cost', 'Total Revenue', 
-        'ROI', 'CPA_Plot', 'IAP UV', 'CPP_Pay', 'HV_Rate', 'PUR'
+        'ROI', 'CPA_Plot', 'IAP UV', 'CPP_Pay', 'L20_Pass_Rate', 'CPA_L20', 'PUR'
     ]
     
     # 映射更友好的列名
@@ -119,7 +119,8 @@ if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
         'Dimension Value': '维度名称',
         'CPA_Plot': '激活成本',
         'CPP_Pay': '付费成本',
-        'HV_Rate': '高价值率',
+        'L20_Pass_Rate': '20关通过率',
+        'CPA_L20': '20关成本',
         'PUR': '付费率'
     })
 
@@ -127,8 +128,8 @@ if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
         display_df.style.format({
             'Cost': '${:,.2f}', 'Total Revenue': '${:,.2f}', 'ROI': '{:.2%}',
             '激活成本': '${:.2f}', 'IAP UV': '{:,.0f}', '付费成本': '${:.2f}',
-            '高价值率': '{:.1%}', '付费率': '{:.2%}'
-        }),
+            '20关通过率': '{:.2%}', '20关成本': '${:.2f}', '付费率': '{:.2%}'
+        }, na_rep=''),
         use_container_width=True, hide_index=True
     )
 
