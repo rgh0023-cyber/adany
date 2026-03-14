@@ -37,12 +37,15 @@ class DataAnalyser:
         # 付费率 (PUR)
         df['PUR'] = (df['IAP UV'] / df['Plot UV']).replace([np.inf, -np.inf], 0).fillna(0)
         
-        # 20关通过率 = L20 UV / Plot UV，分母为0为空值
-        df['L20_Pass_Rate'] = np.where(df['Plot UV'] == 0, np.nan, df['L20 UV'] / df['Plot UV'])
-        df['L20_Pass_Rate'] = df['L20_Pass_Rate'].replace([np.inf, -np.inf], np.nan)
-        # 20关成本 = Cost / L20 UV，分母为0为空值
-        df['CPA_L20'] = np.where(df['L20 UV'] == 0, np.nan, df['Cost'] / df['L20 UV'])
-        df['CPA_L20'] = df['CPA_L20'].replace([np.inf, -np.inf], np.nan)
+        # 基于原始 SQL 列做衍生：仅当原始表存在对应列时才增加展示用列
+        if 'L20 UV' in df.columns and 'Plot UV' in df.columns:
+            # 20关通过率 = L20 UV / Plot UV，分母为0为空值
+            df['L20_Pass_Rate'] = np.where(df['Plot UV'] == 0, np.nan, df['L20 UV'] / df['Plot UV'])
+            df['L20_Pass_Rate'] = df['L20_Pass_Rate'].replace([np.inf, -np.inf], np.nan)
+        if 'L20 UV' in df.columns and 'Cost' in df.columns:
+            # 20关成本 = Cost / L20 UV，分母为0为空值
+            df['CPA_L20'] = np.where(df['L20 UV'] == 0, np.nan, df['Cost'] / df['L20 UV'])
+            df['CPA_L20'] = df['CPA_L20'].replace([np.inf, -np.inf], np.nan)
         
         # 4. 状态评分逻辑
         def get_status(row):

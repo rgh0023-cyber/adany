@@ -107,29 +107,31 @@ if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
     c5.metric("IAP UV", f"{int(metrics['IAP UV 总数']):,}")
     c6.metric("IAP 转化成本", f"${metrics['IAP 转化成本']:.2f}")
 
-    # 1.2 分析表格
+    # 1.2 分析表格（只展示分析层已有的列：原始 SQL 取数 → 分析层修改 → 此处展示）
     st.subheader("维度穿透视图")
-    view_cols = [
-        'Date', 'OS', 'Dimension Value', 'Cost', 'Total Revenue', 
+    view_cols_wanted = [
+        'Date', 'OS', 'Dimension Value', 'Cost', 'Total Revenue',
         'ROI', 'CPA_Plot', 'IAP UV', 'CPP_Pay', 'L20_Pass_Rate', 'CPA_L20', 'PUR'
     ]
-    
-    # 映射更友好的列名
-    display_df = df_analysed[view_cols].rename(columns={
+    display_cols = [c for c in view_cols_wanted if c in df_analysed.columns]
+
+    rename_map = {
         'Dimension Value': '维度名称',
         'CPA_Plot': '激活成本',
         'CPP_Pay': '付费成本',
         'L20_Pass_Rate': '20关通过率',
         'CPA_L20': '20关成本',
         'PUR': '付费率'
-    })
+    }
+    display_df = df_analysed[display_cols].rename(columns={k: v for k, v in rename_map.items() if k in display_cols})
 
+    format_map = {
+        'Cost': '${:,.2f}', 'Total Revenue': '${:,.2f}', 'ROI': '{:.2%}',
+        '激活成本': '${:.2f}', 'IAP UV': '{:,.0f}', '付费成本': '${:.2f}',
+        '20关通过率': '{:.2%}', '20关成本': '${:.2f}', '付费率': '{:.2%}'
+    }
     st.dataframe(
-        display_df.style.format({
-            'Cost': '${:,.2f}', 'Total Revenue': '${:,.2f}', 'ROI': '{:.2%}',
-            '激活成本': '${:.2f}', 'IAP UV': '{:,.0f}', '付费成本': '${:.2f}',
-            '20关通过率': '{:.2%}', '20关成本': '${:.2f}', '付费率': '{:.2%}'
-        }, na_rep=''),
+        display_df.style.format({k: v for k, v in format_map.items() if k in display_df.columns}, na_rep=''),
         use_container_width=True, hide_index=True
     )
 
