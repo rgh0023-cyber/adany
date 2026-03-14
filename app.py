@@ -1,5 +1,7 @@
 import streamlit as st
 import datetime
+import os
+import requests
 import pandas as pd
 import numpy as np
 # 确保以下自定义模块在同一目录下
@@ -7,6 +9,107 @@ from ta_api import TAClient
 from data_processor import clean_sql_response
 from analysis_lib import AdAnalysis
 from data_analyser import DataAnalyser
+
+# --- AI 解读：从 txt 读取 prompt / 配置，按 OS 与维度汇总后调 SiliconFlow ---
+def _load_prompt_txt():
+    path = os.path.join(os.path.dirname(__file__), "ai_interpret_prompt.txt")
+    if os.path.isfile(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+    return ""
+
+def _load_siliconflow_config():
+    path = os.path.join(os.path.dirname(__file__), "siliconflow_config.txt")
+    cfg = {"model": "", "base_url": "https://api.siliconflow.cn/v1", "max_tokens": 2000, "temperature": 0.7}
+    if not os.path.isfile(path):
+        return cfg
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                k, v = line.split("=", 1)
+                k = k.strip().lower()
+                v = v.strip()
+                if k in cfg:
+                    cfg[k] = v if k in ("model", "base_url") else (int(v) if k == "max_tokens" else float(v))
+    return cfg
+
+def _build_data_summary(df):
+    """基于本次查询全量数据（不按筛选），按总体 / OS / 维度名汇总，供 AI 解读"""
+    if df is None or df.empty:
+        return "（无数据）"
+    sum_cols = [c for c in ["Cost", "Total Revenue", "IAP Revenue", "Plot UV", "IAP UV", "L20 UV"] if c in df.columns]
+    ecpm_cols = [c for c in ["ECPM_100_200", "ECPM_200_300", "ECPM_300_400", "ECPM_400_500", "ECPM_500+"] if c in df.columns]
+    if sum_cols:
+        sum_cols = sum_cols + ecpm_cols
+    if not sum_cols:
+        return "（无可汇总指标）"
+    def add_derived(g):
+        if "Cost" in g.columns and g["Cost"].sum():
+            g = g.copy()
+            g["ROI"] = g["Total Revenue"] / g["Cost"] if "Total Revenue" in g.columns else np.nan
+            g["CPA_Plot"] = g["Cost"] / g["Plot UV"].replace(0, np.nan) if "Plot UV" in g.columns else np.nan
+            if "L20 UV" in g.columns and "Plot UV" in g.columns:
+                g["L20_Pass_Rate"] = g["L20 UV"] / g["Plot UV"].replace(0, np.nan)
+            if ecpm_cols and "Plot UV" in g.columns:
+                g["High_ECPM_Rate"] = g[ecpm_cols].sum(axis=1) / g["Plot UV"].replace(0, np.nan)
+        return g
+    def row_text(name, r):
+        parts = [f"Cost={r.get('Cost', 0):.2f}", f"Total Revenue={r.get('Total Revenue', 0):.2f}"]
+        if not pd.isna(r.get("ROI")): parts.append(f"ROI={r['ROI']:.2%}")
+        parts.append(f"Plot UV={r.get('Plot UV', 0):.0f}"); parts.append(f"IAP UV={r.get('IAP UV', 0):.0f}")
+        if not pd.isna(r.get("L20_Pass_Rate")): parts.append(f"L20通过率={r['L20_Pass_Rate']:.1%}")
+        if not pd.isna(r.get("High_ECPM_Rate")): parts.append(f"高质量占比={r['High_ECPM_Rate']:.1%}")
+        return name + "： " + "，".join(parts)
+    lines = []
+    total = df[sum_cols].sum()
+    total["ROI"] = total["Total Revenue"] / total["Cost"] if total.get("Cost") else np.nan
+    total["CPA_Plot"] = total["Cost"] / total["Plot UV"] if total.get("Plot UV") else np.nan
+    total["L20_Pass_Rate"] = total["L20 UV"] / total["Plot UV"] if total.get("Plot UV") else np.nan
+    if ecpm_cols and total.get("Plot UV"):
+        total["High_ECPM_Rate"] = sum(total.get(c, 0) for c in ecpm_cols) / total["Plot UV"]
+    lines.append("【总体】")
+    lines.append(row_text("汇总", total))
+    if "OS" in df.columns:
+        by_os = df.groupby("OS", dropna=False)[sum_cols].sum()
+        by_os = add_derived(by_os)
+        lines.append("\n【按 OS】")
+        for os_name, r in by_os.iterrows():
+            lines.append(row_text(str(os_name), r))
+    if "Dimension Value" in df.columns:
+        by_dim = df.groupby("Dimension Value", dropna=False)[sum_cols].sum()
+        by_dim = add_derived(by_dim)
+        lines.append("\n【按维度名称】")
+        for dim_name, r in by_dim.iterrows():
+            lines.append(row_text(str(dim_name), r))
+    return "\n".join(lines)
+
+def _call_siliconflow(prompt_text, data_summary, api_key, config):
+    """用 SiliconFlow 生成解读，返回助手回复文本或错误信息"""
+    if not api_key or not config.get("model"):
+        return None, "未配置 SiliconFlow API Key 或模型名（见 secrets 与 siliconflow_config.txt）"
+    base = (config.get("base_url") or "https://api.siliconflow.cn/v1").rstrip("/")
+    url = f"{base}/chat/completions"
+    payload = {
+        "model": config["model"],
+        "messages": [{"role": "user", "content": prompt_text + "\n\n以下是本次查询的数据汇总：\n" + data_summary}],
+        "max_tokens": config.get("max_tokens", 2000),
+        "temperature": config.get("temperature", 0.7),
+    }
+    try:
+        r = requests.post(url, json=payload, headers={"Authorization": f"Bearer {api_key}"}, timeout=60)
+        if r.status_code != 200:
+            return None, f"API 返回 {r.status_code}: {r.text[:200]}"
+        data = r.json()
+        choice = (data.get("choices") or [None])[0]
+        if not choice:
+            return None, "API 未返回内容"
+        msg = choice.get("message") or {}
+        return (msg.get("content") or "").strip(), None
+    except Exception as e:
+        return None, str(e)
 
 # 1. 页面基础配置
 st.set_page_config(
@@ -156,6 +259,8 @@ if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
     st.session_state["cohort_start_s"] = start_s
     st.session_state["cohort_end_s"] = end_s
     st.session_state["cohort_dim_choice"] = dim_choice
+    if "ai_interpret_result" in st.session_state:
+        del st.session_state["ai_interpret_result"]
 
 # 有缓存结果时：始终展示结果区（卡片、筛选只改表格，其他不动）
 if "cohort_df_analysed" in st.session_state:
@@ -186,6 +291,28 @@ if "cohort_df_analysed" in st.session_state:
     c4.metric("总转化成本(CPA)", f"${metrics['总转化成本']:.2f}")
     c5.metric("IAP UV", f"{int(metrics['IAP UV 总数']):,}")
     c6.metric("IAP 转化成本", f"${metrics['IAP 转化成本']:.2f}")
+
+    # AI 数据解读：基于本次查询全量数据（不考虑筛选），prompt 与 SiliconFlow 参数来自 txt
+    st.subheader("🤖 AI 数据解读")
+    try:
+        api_key = st.secrets.get("siliconflow_api_key", "")
+    except Exception:
+        api_key = ""
+    if st.button("生成解读", key="ai_interpret_btn"):
+        prompt_text = _load_prompt_txt()
+        if not prompt_text:
+            st.warning("未找到 ai_interpret_prompt.txt，请在本项目根目录放置该文件并写入 prompt。")
+        else:
+            with st.spinner("正在调用 AI 生成解读…"):
+                cfg = _load_siliconflow_config()
+                summary = _build_data_summary(df_analysed)
+                content, err = _call_siliconflow(prompt_text, summary, api_key, cfg)
+                if err:
+                    st.error("解读生成失败：" + err)
+                else:
+                    st.session_state["ai_interpret_result"] = content
+    if st.session_state.get("ai_interpret_result"):
+        st.markdown(st.session_state["ai_interpret_result"])
 
     st.subheader("维度穿透视图")
     view_cols_wanted = [
