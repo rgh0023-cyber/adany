@@ -37,6 +37,12 @@ class DataAnalyser:
         # 付费率 (PUR)
         df['PUR'] = (df['IAP UV'] / df['Plot UV']).replace([np.inf, -np.inf], 0).fillna(0)
         
+        # 高质量占比 = ECPM>100 用户数 / Plot UV，分母为0为空值
+        ecpm_100_cols = ['ECPM_100_200', 'ECPM_200_300', 'ECPM_300_400', 'ECPM_400_500', 'ECPM_500+']
+        if all(c in df.columns for c in ecpm_100_cols) and 'Plot UV' in df.columns:
+            high_ecpm_sum = sum(df[c] for c in ecpm_100_cols)
+            df['High_ECPM_Rate'] = np.where(df['Plot UV'] == 0, np.nan, high_ecpm_sum / df['Plot UV'])
+            df['High_ECPM_Rate'] = df['High_ECPM_Rate'].replace([np.inf, -np.inf], np.nan)
         # 基于原始 SQL 列做衍生：仅当原始表存在对应列时才增加展示用列
         if 'L20 UV' in df.columns and 'Plot UV' in df.columns:
             # 20关通过率 = L20 UV / Plot UV，分母为0为空值
