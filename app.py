@@ -86,15 +86,18 @@ def _build_data_summary(df):
             lines.append(row_text(str(dim_name), r))
     return "\n".join(lines)
 
-def _call_siliconflow(prompt_text, data_summary, api_key, config):
-    """用 SiliconFlow 生成解读，返回助手回复文本或错误信息"""
+# 追问时强制限定在数据解读范围的系统说明（会加入每次请求）
+_AI_SCOPE_SYSTEM = "你是一位投放数据分析师。你的所有回答（包括首次解读与后续追问）必须严格限定在用户提供的本次查询数据解读范围内，仅基于已给数据作答，不要脱离数据编造或泛化。"
+
+def _call_siliconflow_chat(api_key, config, messages):
+    """用 SiliconFlow 多轮对话，messages 为 [{"role":"user"|"assistant"|"system", "content":"..."}, ...]，返回助手回复文本或错误信息"""
     if not api_key or not config.get("model"):
         return None, "未配置 SiliconFlow API Key 或模型名（见 secrets 与 siliconflow_config.txt）"
     base = (config.get("base_url") or "https://api.siliconflow.cn/v1").rstrip("/")
     url = f"{base}/chat/completions"
     payload = {
         "model": config["model"],
-        "messages": [{"role": "user", "content": prompt_text + "\n\n以下是本次查询的数据汇总：\n" + data_summary}],
+        "messages": messages,
         "max_tokens": config.get("max_tokens", 2000),
         "temperature": config.get("temperature", 0.7),
     }
@@ -261,6 +264,8 @@ if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
     st.session_state["cohort_dim_choice"] = dim_choice
     if "ai_interpret_result" in st.session_state:
         del st.session_state["ai_interpret_result"]
+    if "ai_interpret_conversation" in st.session_state:
+        del st.session_state["ai_interpret_conversation"]
 
 # 有缓存结果时：始终展示结果区（卡片、筛选只改表格，其他不动）
 if "cohort_df_analysed" in st.session_state:
@@ -292,12 +297,14 @@ if "cohort_df_analysed" in st.session_state:
     c5.metric("IAP UV", f"{int(metrics['IAP UV 总数']):,}")
     c6.metric("IAP 转化成本", f"${metrics['IAP 转化成本']:.2f}")
 
-    # AI 数据解读：基于本次查询全量数据（不考虑筛选），prompt 与 SiliconFlow 参数来自 txt
+    # AI 数据解读：基于本次查询全量数据（不考虑筛选）；支持最多 2 次追问，回答限定在数据解读范围
     st.subheader("🤖 AI 数据解读")
     try:
         api_key = st.secrets.get("siliconflow_api_key", "")
     except Exception:
         api_key = ""
+    conv = st.session_state.get("ai_interpret_conversation", [])
+
     if st.button("生成解读", key="ai_interpret_btn"):
         prompt_text = _load_prompt_txt()
         if not prompt_text:
@@ -306,13 +313,53 @@ if "cohort_df_analysed" in st.session_state:
             with st.spinner("正在调用 AI 生成解读…"):
                 cfg = _load_siliconflow_config()
                 summary = _build_data_summary(df_analysed)
-                content, err = _call_siliconflow(prompt_text, summary, api_key, cfg)
+                user_content = prompt_text + "\n\n以下是本次查询的数据汇总：\n" + summary + "\n\n请根据以上数据给出总体解读。"
+                messages = [
+                    {"role": "system", "content": _AI_SCOPE_SYSTEM},
+                    {"role": "user", "content": user_content},
+                ]
+                content, err = _call_siliconflow_chat(api_key, cfg, messages)
                 if err:
                     st.error("解读生成失败：" + err)
                 else:
-                    st.session_state["ai_interpret_result"] = content
-    if st.session_state.get("ai_interpret_result"):
-        st.markdown(st.session_state["ai_interpret_result"])
+                    st.session_state["ai_interpret_conversation"] = [
+                        {"role": "user", "content": user_content},
+                        {"role": "assistant", "content": content},
+                    ]
+        st.rerun()
+
+    # 展示已有对话：首次解读 + 追问与回答（不展示首条长 prompt）
+    if conv:
+        first_reply_shown = False
+        for m in conv:
+            if m["role"] == "assistant":
+                st.markdown("**解读：**" if not first_reply_shown else "**答：**")
+                st.markdown(m["content"])
+                first_reply_shown = True
+            else:
+                if first_reply_shown:
+                    st.markdown("**问：** " + m["content"])
+        # 追问：每轮查询最多 2 个问题（不含首次“生成解读”）
+        user_msgs = [m for m in conv if m["role"] == "user"]
+        question_count = len(user_msgs) - 1
+        can_ask = question_count < 2
+        if can_ask:
+            with st.form("ai_followup_form"):
+                followup_q = st.text_input("追问（限定在本次数据解读范围内）", key="ai_followup_input")
+                submitted = st.form_submit_button("提问")
+                if submitted and followup_q.strip():
+                    with st.spinner("正在生成回答…"):
+                        cfg = _load_siliconflow_config()
+                        new_conv = conv + [{"role": "user", "content": followup_q.strip()}]
+                        messages = [{"role": "system", "content": _AI_SCOPE_SYSTEM}] + new_conv
+                        content, err = _call_siliconflow_chat(api_key, cfg, messages)
+                        if err:
+                            st.error("追问回答失败：" + err)
+                        else:
+                            st.session_state["ai_interpret_conversation"] = new_conv + [{"role": "assistant", "content": content}]
+                    st.rerun()
+        else:
+            st.caption("本轮已达 2 次追问上限，重新执行查询后可再次生成解读并追问。")
 
     st.subheader("维度穿透视图")
     view_cols_wanted = [
