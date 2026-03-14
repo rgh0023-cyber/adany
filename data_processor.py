@@ -52,23 +52,4 @@ class DataAnalyser:
             "IAP 转化成本": total_cost / total_iap_uv if total_iap_uv > 0 else 0
         }
 
-# 将这段代码添加到 data_processor.py 的最下面（不要放在类里面）
 
-def clean_sql_response(df):
-    """
-    基础清洗：处理空值、格式化列名，确保 DataFrame 可以被 Streamlit 正常渲染
-    """
-    if df is None or df.empty:
-        return pd.DataFrame()
-    
-    # 1. 确保所有列名是字符串
-    df.columns = [str(col) for col in df.columns]
-    
-    # 2. 转换日期格式（如果是字符串则转为 datetime）
-    if 'Date' in df.columns:
-        df['Date'] = pd.to_datetime(df['Date']).dt.date
-    
-    # 3. 填充空值，避免前端显示 NaN
-    df = df.fillna(0)
-    
-    return df
