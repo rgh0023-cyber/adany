@@ -109,12 +109,24 @@ if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
 
     # 1.2 分析表格（只展示分析层已有的列：原始 SQL 取数 → 分析层修改 → 此处展示）
     st.subheader("维度穿透视图")
+    # 筛选项：仅基于当前可展示数据（df_analysed），不做全局筛选
     view_cols_wanted = [
         'Date', 'OS', 'Dimension Value', 'Cost', 'Total Revenue',
         'ROI', 'CPA_Plot', 'IAP UV', 'CPP_Pay', 'L20_Pass_Rate', 'CPA_L20', 'PUR'
     ]
     display_cols = [c for c in view_cols_wanted if c in df_analysed.columns]
-
+    df_view = df_analysed.copy()
+    if 'OS' in df_analysed.columns:
+        options_os = sorted(df_analysed['OS'].dropna().astype(str).unique().tolist())
+        selected_os = st.multiselect("筛选 OS", options=options_os, default=[], key="filter_os")
+        if selected_os:
+            df_view = df_view[df_view['OS'].astype(str).isin(selected_os)]
+    if 'Dimension Value' in df_analysed.columns:
+        options_dim = sorted(df_analysed['Dimension Value'].dropna().astype(str).unique().tolist())
+        selected_dim = st.multiselect("筛选 维度名称", options=options_dim, default=[], key="filter_dim")
+        if selected_dim:
+            df_view = df_view[df_view['Dimension Value'].astype(str).isin(selected_dim)]
+    display_cols = [c for c in view_cols_wanted if c in df_view.columns]
     rename_map = {
         'Dimension Value': '维度名称',
         'CPA_Plot': '激活成本',
@@ -123,7 +135,7 @@ if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
         'CPA_L20': '20关成本',
         'PUR': '付费率'
     }
-    display_df = df_analysed[display_cols].rename(columns={k: v for k, v in rename_map.items() if k in display_cols})
+    display_df = df_view[display_cols].rename(columns={k: v for k, v in rename_map.items() if k in display_cols})
 
     format_map = {
         'Cost': '${:,.2f}', 'Total Revenue': '${:,.2f}', 'ROI': '{:.2%}',
