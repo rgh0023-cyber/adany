@@ -1,55 +1,41 @@
 import pandas as pd
 import numpy as np
+import io  # 必须引入，用于处理文本流
 
-class DataAnalyser:
-    @staticmethod
-    def perform_business_analysis(df_raw):
-        """
-        分析层：基于 Cohort 逻辑的指标加工
-        去掉了 Status 逻辑，仅保留数值计算。
-        """
-        if df_raw.empty:
-            return df_raw
+def clean_sql_response(raw_text):
+    """
+    基础清洗：
+    1. 修复崩溃：将 API 返回的 CSV 字符串转换为 DataFrame
+    2. 格式化：统一列名、日期和填充空值
+    """
+    # 如果 raw_text 不是字符串或为空，直接返回空表，防止 AttributeError
+    if not isinstance(raw_text, str) or not raw_text.strip():
+        return pd.DataFrame()
+
+    try:
+        # --- 核心修复：把文本转成表格 ---
+        df = pd.read_csv(io.StringIO(raw_text))
         
-        df = df_raw.copy()
+        # 此时 df 已经是 DataFrame 对象，可以安全使用 .empty 了
+        if df.empty:
+            return pd.DataFrame()
         
-        # 1. 强制数值化
-        numeric_cols = [c for c in df.columns if any(x in c for x in ['UV', 'Revenue', 'Cost', 'ECPM', 'L', 'Times'])]
-        for col in numeric_cols:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        # 1. 强制列名转为字符串 (防止 SQL 别名导致的问题)
+        df.columns = [str(col) for col in df.columns]
+        
+        # 2. 转换日期格式 (保持昨天调通后的展示格式)
+        if 'Date' in df.columns:
+            # 兼容各种日期格式，统一只保留 YYYY-MM-DD
+            df['Date'] = pd.to_datetime(df['Date']).dt.date
             
-        # 2. 核心定义计算
-        df['Total Revenue'] = df['IAP Revenue'] + df['Ad Revenue']
-        df['ROI'] = (df['Total Revenue'] / df['Cost']).replace([np.inf, -np.inf], 0).fillna(0)
-        df['CPA_Plot'] = (df['Cost'] / df['Plot UV']).replace([np.inf, -np.inf], 0).fillna(0)
-        df['CPP_Pay'] = (df['Cost'] / df['IAP UV']).replace([np.inf, -np.inf], 0).fillna(0)
-        
-        # 3. 辅助质量指标
-        high_value_sum = df['ECPM_300_400'] + df['ECPM_400_500'] + df['ECPM_500+']
-        df['HV_Rate'] = (high_value_sum / df['Plot UV']).replace([np.inf, -np.inf], 0).fillna(0)
-        df['PUR'] = (df['IAP UV'] / df['Plot UV']).replace([np.inf, -np.inf], 0).fillna(0)
+        # 3. 填充空值，避免 Streamlit 报错
+        df = df.fillna(0)
         
         return df
-
-    @staticmethod
-    def get_summary_metrics(df_analysed):
-        """生成顶部汇总数值"""
-        if df_analysed.empty: return {}
         
-        total_cost = df_analysed['Cost'].sum()
-        total_iap_rev = df_analysed['IAP Revenue'].sum()
-        total_ad_rev = df_analysed['Ad Revenue'].sum()
-        total_rev = total_iap_rev + total_ad_rev
-        total_plot = df_analysed['Plot UV'].sum()
-        total_iap_uv = df_analysed['IAP UV'].sum()
-        
-        return {
-            "总消耗": total_cost,
-            "总营收": total_rev,
-            "综合 ROI": total_rev / total_cost if total_cost > 0 else 0,
-            "总转化成本": total_cost / total_plot if total_plot > 0 else 0,
-            "IAP UV 总数": total_iap_uv,
-            "IAP 转化成本": total_cost / total_iap_uv if total_iap_uv > 0 else 0
-        }
+    except Exception as e:
+        # 即使解析报错，也要返回空表让 app.py 继续运行，而不是直接崩溃
+        print(f"解析 CSV 数据失败: {e}")
+        return pd.DataFrame()
 
-
+# 如果你的代码里还有 DataAnalyser 类，可以保持在下方，或者只保留这个函数
