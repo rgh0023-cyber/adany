@@ -1,6 +1,7 @@
 import streamlit as st
 import datetime
 import pandas as pd
+import numpy as np
 # 确保以下自定义模块在同一目录下
 from ta_api import TAClient
 from data_processor import clean_sql_response
@@ -87,10 +88,20 @@ if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
 # 有缓存结果时：始终展示结果区（卡片、筛选只改表格，其他不动）
 if "cohort_df_analysed" in st.session_state:
     df_raw = st.session_state["cohort_df_raw"]
-    df_analysed = st.session_state["cohort_df_analysed"]
+    df_analysed = st.session_state["cohort_df_analysed"].copy()
     start_s = st.session_state["cohort_start_s"]
     end_s = st.session_state["cohort_end_s"]
     dim_choice = st.session_state["cohort_dim_choice"]
+    # 展示前兜底：若分析层未产出高质量占比，则用原始列在展示前算一列
+    if "High_ECPM_Rate" not in df_analysed.columns:
+        ecpm_cols = ['ECPM_100_200', 'ECPM_200_300', 'ECPM_300_400', 'ECPM_400_500', 'ECPM_500+']
+        if all(c in df_analysed.columns for c in ecpm_cols) and 'Plot UV' in df_analysed.columns:
+            high_sum = sum(df_analysed[c] for c in ecpm_cols)
+            df_analysed['High_ECPM_Rate'] = np.where(
+                df_analysed['Plot UV'] == 0, np.nan,
+                high_sum / df_analysed['Plot UV']
+            )
+            df_analysed['High_ECPM_Rate'] = df_analysed['High_ECPM_Rate'].replace([np.inf, -np.inf], np.nan)
     metrics = DataAnalyser.get_summary_metrics(df_analysed)
 
     st.header("📊 业务分析层 (Cohort Based)")
