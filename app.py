@@ -15,6 +15,35 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# --- 登录：未登录只显示登录框，验证通过后再显示主界面 ---
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+
+def _check_login(username, password):
+    """从 Secrets 读取预期账号密码并校验（未配置则不允许登录）"""
+    try:
+        want_user = st.secrets.get("login_username", "")
+        want_pass = st.secrets.get("login_password", "")
+        if not want_user or not want_pass:
+            return False
+        return username == want_user and password == want_pass
+    except Exception:
+        return False
+
+if not st.session_state["logged_in"]:
+    st.title("ROI 智能分析系统 — 登录")
+    with st.form("login_form"):
+        login_user = st.text_input("用户名")
+        login_pass = st.text_input("密码", type="password")
+        submitted = st.form_submit_button("登录")
+        if submitted:
+            if _check_login(login_user, login_pass):
+                st.session_state["logged_in"] = True
+                st.rerun()
+            else:
+                st.error("用户名或密码错误")
+    st.stop()
+
 # --- 2. 侧边栏配置 ---
 def _get_token():
     """优先从 Streamlit Secrets 读取 Token，否则使用侧边栏输入"""
@@ -56,6 +85,17 @@ with st.sidebar:
     default_start = datetime.date.today() - datetime.timedelta(days=7)
     default_end = datetime.date.today()
     d_range = st.date_input("选择新增批次范围", [default_start, default_end])
+
+    st.markdown("---")
+    if st.button("退出登录", use_container_width=True):
+        st.session_state["logged_in"] = False
+        if "cohort_df_analysed" in st.session_state:
+            del st.session_state["cohort_df_analysed"]
+            del st.session_state["cohort_df_raw"]
+            del st.session_state["cohort_start_s"]
+            del st.session_state["cohort_end_s"]
+            del st.session_state["cohort_dim_choice"]
+        st.rerun()
 
 # --- 3. 核心逻辑：点击查询时执行并写入 session_state，之后仅用筛选改展示 ---
 if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
