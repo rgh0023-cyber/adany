@@ -1,67 +1,53 @@
 import pandas as pd
-import io
-import re
+import numpy as np
 
-def clean_sql_response(raw_text):
-    if not raw_text or len(raw_text.strip()) == 0:
-        return pd.DataFrame()
-
-    # --- 强力解码逻辑开始 ---
-    # 如果输入是 bytes，先尝试 utf-8，不行再尝试 gbk
-    if isinstance(raw_text, bytes):
-        try:
-            content = raw_text.decode('utf-8')
-        except UnicodeDecodeError:
-            content = raw_text.decode('gbk', errors='ignore')
-    else:
-        # 如果已经是字符串，但看起来像乱码（ISO-8859-1 误认 UTF-8）
-        try:
-            content = raw_text.encode('iso-8859-1').decode('utf-8')
-        except (UnicodeEncodeError, UnicodeDecodeError):
-            content = raw_text
-    # --- 强力解码逻辑结束 ---
-
-    try:
-        # 定义物理对齐表头
-        expected_cols = [
-            'Date', 'Dimension Value', 'Media Source', 'OS', 'Cost', 'Plot UV', 
-            'ECPM_Null', 'ECPM_0_100', 'ECPM_100_200', 'ECPM_200_300', 
-            'ECPM_300_400', 'ECPM_400_500', 'ECPM_500+',
-            'L10 UV', 'L20 UV', 'L30 UV', 'L40 UV', 'L50 UV', 'L60 UV', 'L70 UV', 'L80 UV', 'L90 UV', 'L100 UV',
-            'IAP UV', 'IAP Times', 'IAP Revenue', 'Ad UV', 'Ad Revenue', 'total_amount', 'group_num_0', 'group_num'
-        ]
-
-        # 使用 StringIO 读取，显式指定引擎
-        df = pd.read_csv(
-            io.StringIO(content.strip()), 
-            header=None, 
-            quotechar='"', 
-            skipinitialspace=True,
-            engine='python'
-        )
+class DataAnalyser:
+    @staticmethod
+    def perform_business_analysis(df_raw):
+        """
+        分析层：基于 Cohort 逻辑的指标加工
+        去掉了 Status 逻辑，仅保留数值计算。
+        """
+        if df_raw.empty:
+            return df_raw
         
-        # 过滤第一行是表头字符的情况
-        if df.shape[0] > 0 and ("Date" in str(df.iloc[0,0]) or "Dimension" in str(df.iloc[0,0])):
-            df = df.iloc[1:].reset_index(drop=True)
+        df = df_raw.copy()
         
-        # 强制对齐列名
-        df.columns = expected_cols[:df.shape[1]]
-
-        # 清洗特殊字符
-        def clean_val(x):
-            if isinstance(x, str):
-                return re.sub(r'["\'\r\n\t]', '', x).strip()
-            return x
-
-        df = df.applymap(clean_val)
-
-        # 核心指标转数值
-        numeric_cols = ['Cost', 'IAP Revenue', 'Ad Revenue', 'Plot UV']
+        # 1. 强制数值化
+        numeric_cols = [c for c in df.columns if any(x in c for x in ['UV', 'Revenue', 'Cost', 'ECPM', 'L', 'Times'])]
         for col in numeric_cols:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)
-
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            
+        # 2. 核心定义计算
+        df['Total Revenue'] = df['IAP Revenue'] + df['Ad Revenue']
+        df['ROI'] = (df['Total Revenue'] / df['Cost']).replace([np.inf, -np.inf], 0).fillna(0)
+        df['CPA_Plot'] = (df['Cost'] / df['Plot UV']).replace([np.inf, -np.inf], 0).fillna(0)
+        df['CPP_Pay'] = (df['Cost'] / df['IAP UV']).replace([np.inf, -np.inf], 0).fillna(0)
+        
+        # 3. 辅助质量指标
+        high_value_sum = df['ECPM_300_400'] + df['ECPM_400_500'] + df['ECPM_500+']
+        df['HV_Rate'] = (high_value_sum / df['Plot UV']).replace([np.inf, -np.inf], 0).fillna(0)
+        df['PUR'] = (df['IAP UV'] / df['Plot UV']).replace([np.inf, -np.inf], 0).fillna(0)
+        
         return df
-    except Exception as e:
-        print(f"解析错误: {e}")
-        return pd.DataFrame()
+
+    @staticmethod
+    def get_summary_metrics(df_analysed):
+        """生成顶部汇总数值"""
+        if df_analysed.empty: return {}
+        
+        total_cost = df_analysed['Cost'].sum()
+        total_iap_rev = df_analysed['IAP Revenue'].sum()
+        total_ad_rev = df_analysed['Ad Revenue'].sum()
+        total_rev = total_iap_rev + total_ad_rev
+        total_plot = df_analysed['Plot UV'].sum()
+        total_iap_uv = df_analysed['IAP UV'].sum()
+        
+        return {
+            "总消耗": total_cost,
+            "总营收": total_rev,
+            "综合 ROI": total_rev / total_cost if total_cost > 0 else 0,
+            "总转化成本": total_cost / total_plot if total_plot > 0 else 0,
+            "IAP UV 总数": total_iap_uv,
+            "IAP 转化成本": total_cost / total_iap_uv if total_iap_uv > 0 else 0
+        }
