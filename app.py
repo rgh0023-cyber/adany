@@ -56,49 +56,46 @@ with st.sidebar:
     default_end = datetime.date.today()
     d_range = st.date_input("选择新增批次范围", [default_start, default_end])
 
-# --- 3. 核心逻辑执行 ---
+# --- 3. 核心逻辑：点击查询时执行并写入 session_state，之后仅用筛选改展示 ---
 if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
     if not token:
         st.warning("⚠️ 请先在侧边栏输入 API Token")
         st.stop()
-    
-    # 解析日期范围
     start_s = d_range[0].strftime('%Y-%m-%d')
     end_s = d_range[1].strftime('%Y-%m-%d') if len(d_range) > 1 else start_s
-
-    # 初始化客户端
     client = TAClient("https://ta-open.jackpotlandslots.com", token)
-    
     with st.spinner(f"正在分析 {start_s} 至 {end_s} 的新增批次数据..."):
-        # 获取 SQL (已在 analysis_lib 中更新为 Cohort 逻辑)
         if dim_choice == "全量汇总":
             sql = AdAnalysis.get_absolute_summary_sql(project_id, start_s, end_s)
         else:
             sql = AdAnalysis.get_advertising_report_sql(project_id, start_s, end_s, dim_choice)
-        
-        # 执行查询
         raw_text, error = client.execute_query(sql)
-        
         if error:
             st.error(f"❌ SQL 执行错误: {error}")
             st.stop()
-        
-        # 清洗数据
         df_raw = clean_sql_response(raw_text)
-
     if df_raw.empty:
         st.info("📭 该范围内暂无新增用户数据")
         st.stop()
+    df_analysed = DataAnalyser.perform_business_analysis(df_raw)
+    st.session_state["cohort_df_raw"] = df_raw
+    st.session_state["cohort_df_analysed"] = df_analysed
+    st.session_state["cohort_start_s"] = start_s
+    st.session_state["cohort_end_s"] = end_s
+    st.session_state["cohort_dim_choice"] = dim_choice
 
-    # --- 第一部分：上部 - 业务分析层 (Analysis Module) ---
+# 有缓存结果时：始终展示结果区（卡片、筛选只改表格，其他不动）
+if "cohort_df_analysed" in st.session_state:
+    df_raw = st.session_state["cohort_df_raw"]
+    df_analysed = st.session_state["cohort_df_analysed"]
+    start_s = st.session_state["cohort_start_s"]
+    end_s = st.session_state["cohort_end_s"]
+    dim_choice = st.session_state["cohort_dim_choice"]
+    metrics = DataAnalyser.get_summary_metrics(df_analysed)
+
     st.header("📊 业务分析层 (Cohort Based)")
     st.caption(f"分析逻辑：锁定 {start_s} ~ {end_s} 新增用户，统计其从激活至今的累积价值")
 
-    # 加工数据
-    df_analysed = DataAnalyser.perform_business_analysis(df_raw)
-    metrics = DataAnalyser.get_summary_metrics(df_analysed)
-
-    # 1.1 顶部核心卡片
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("总消耗 (Cost)", f"${metrics['总消耗']:,.2f}")
     c2.metric("总营收 (Gross)", f"${metrics['总营收']:,.2f}")
@@ -107,9 +104,7 @@ if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
     c5.metric("IAP UV", f"{int(metrics['IAP UV 总数']):,}")
     c6.metric("IAP 转化成本", f"${metrics['IAP 转化成本']:.2f}")
 
-    # 1.2 分析表格（只展示分析层已有的列：原始 SQL 取数 → 分析层修改 → 此处展示）
     st.subheader("维度穿透视图")
-    # 筛选项：仅基于当前可展示数据（df_analysed），不做全局筛选
     view_cols_wanted = [
         'Date', 'OS', 'Dimension Value', 'Cost', 'Total Revenue',
         'ROI', 'CPA_Plot', 'IAP UV', 'CPP_Pay', 'L20_Pass_Rate', 'CPA_L20', 'PUR'
@@ -136,7 +131,6 @@ if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
         'PUR': '付费率'
     }
     display_df = df_view[display_cols].rename(columns={k: v for k, v in rename_map.items() if k in display_cols})
-
     format_map = {
         'Cost': '${:,.2f}', 'Total Revenue': '${:,.2f}', 'ROI': '{:.2%}',
         '激活成本': '${:.2f}', 'IAP UV': '{:,.0f}', '付费成本': '${:.2f}',
@@ -147,13 +141,10 @@ if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
         use_container_width=True, hide_index=True
     )
 
-    # --- 第二部分：下部 - 原始数据对账层 (Source Data) ---
     st.markdown("---")
     with st.expander("🔍 原始数据明细 (对账专用)", expanded=False):
         st.write("此处展示 SQL 返回的原始字段（含 ECPM 分布及 L 等级 UV）")
         st.dataframe(df_raw, use_container_width=True)
-        
-        # 导出功能
         csv = df_raw.to_csv(index=False).encode('utf-8')
         st.download_button(
             label="📥 下载原始报表 (.csv)",
@@ -164,10 +155,7 @@ if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
         )
 
 else:
-    # 初始状态提示
     st.info("👈 请在左侧侧边栏配置 Token 和 Cohort 周期，然后点击执行分析。")
-    
-    # 展示分析定义说明
     with st.expander("📚 指标定义说明"):
         st.write("""
         - **总转化成本 (CPA)**: `总消耗 / Plot UV` (获取每个激活用户的成本)
