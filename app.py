@@ -15,33 +15,10 @@ st.set_page_config(
 )
 
 # --- 2. 侧边栏配置 ---
-def _get_token():
-    """优先从 Streamlit Secrets 读取 Token，否则使用侧边栏输入"""
-    try:
-        # 方式一：直接键 ta_api_token
-        token = st.secrets.get("ta_api_token", "")
-        if token:
-            return token
-        # 方式二：嵌套 [ta] token = "xxx"
-        ta = st.secrets.get("ta") or {}
-        if isinstance(ta, dict):
-            return ta.get("token", "")
-    except (FileNotFoundError, AttributeError, TypeError):
-        pass
-    return ""
-
 with st.sidebar:
     st.header("⚙️ 数据源配置")
-    token_from_secrets = _get_token()
-    if token_from_secrets:
-        st.caption("✅ 已使用已配置的 TA API Token（来自 Secrets）")
-        token = token_from_secrets
-        # 仍提供输入框用于临时覆盖（可选）
-        token_override = st.text_input("TA API Token（留空则使用上方已配置）", type="password", help="临时覆盖时在此输入")
-        if token_override:
-            token = token_override
-    else:
-        token = st.text_input("TA API Token", type="password", help="请输入数数科技 API 调用令牌，或配置 .streamlit/secrets.toml")
+    # 建议将 Token 存储在 Streamlit Secrets 中以提高安全性
+    token = st.text_input("TA API Token", type="password", help="请输入数数科技 API 调用令牌")
     project_id = st.number_input("项目 ID", value=46)
     
     st.markdown("---")
@@ -113,7 +90,7 @@ if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
     # 1.2 分析表格
     st.subheader("维度穿透视图")
     view_cols = [
-        'Status', 'Date', 'Dimension Value', 'Cost', 'Total Revenue', 
+        'Date', 'OS', 'Dimension Value', 'Cost', 'Total Revenue', 
         'ROI', 'CPA_Plot', 'IAP UV', 'CPP_Pay', 'HV_Rate', 'PUR'
     ]
     
@@ -127,8 +104,7 @@ if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
     })
 
     st.dataframe(
-        display_df.style.background_gradient(subset=['ROI'], cmap='RdYlGn', vmin=0.3, vmax=1.0)
-        .format({
+        display_df.style.format({
             'Cost': '${:,.2f}', 'Total Revenue': '${:,.2f}', 'ROI': '{:.2%}',
             '激活成本': '${:.2f}', 'IAP UV': '{:,.0f}', '付费成本': '${:.2f}',
             '高价值率': '{:.1%}', '付费率': '{:.2%}'
