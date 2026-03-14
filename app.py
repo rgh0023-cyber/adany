@@ -15,10 +15,33 @@ st.set_page_config(
 )
 
 # --- 2. 侧边栏配置 ---
+def _get_token():
+    """优先从 Streamlit Secrets 读取 Token，否则使用侧边栏输入"""
+    try:
+        # 方式一：直接键 ta_api_token
+        token = st.secrets.get("ta_api_token", "")
+        if token:
+            return token
+        # 方式二：嵌套 [ta] token = "xxx"
+        ta = st.secrets.get("ta") or {}
+        if isinstance(ta, dict):
+            return ta.get("token", "")
+    except (FileNotFoundError, AttributeError, TypeError):
+        pass
+    return ""
+
 with st.sidebar:
     st.header("⚙️ 数据源配置")
-    # 建议将 Token 存储在 Streamlit Secrets 中以提高安全性
-    token = st.text_input("TA API Token", type="password", help="请输入数数科技 API 调用令牌")
+    token_from_secrets = _get_token()
+    if token_from_secrets:
+        st.caption("✅ 已使用已配置的 TA API Token（来自 Secrets）")
+        token = token_from_secrets
+        # 仍提供输入框用于临时覆盖（可选）
+        token_override = st.text_input("TA API Token（留空则使用上方已配置）", type="password", help="临时覆盖时在此输入")
+        if token_override:
+            token = token_override
+    else:
+        token = st.text_input("TA API Token", type="password", help="请输入数数科技 API 调用令牌，或配置 .streamlit/secrets.toml")
     project_id = st.number_input("项目 ID", value=46)
     
     st.markdown("---")
