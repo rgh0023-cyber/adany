@@ -1,4 +1,3 @@
-import pandas as pd
 import datetime
 
 class AdAnalysis:
@@ -6,7 +5,8 @@ class AdAnalysis:
     def get_absolute_summary_sql(project_id, start_date, end_date):
         """
         全量汇总 SQL (Cohort 模式)：
-        锁定 start_date 到 end_date 期间新增的用户，统计他们从激活至今的全量累积数据。
+        - 消耗端：通过 app_id 硬编码判定 (6748138347 为 iOS)
+        - 行为端：通过日志原生 #os 判定
         """
         today_str = datetime.date.today().strftime('%Y-%m-%d')
         
@@ -17,7 +17,7 @@ SELECT * FROM (
         format_datetime("$__Date_Time", 'yyyy-MM-dd') AS "Date",
         'Total' AS "Dimension Value",
         CAST(NULL AS VARCHAR) AS "Media Source",
-        'All' AS "OS",
+        "OS",
         SUM(c0) AS "Cost", SUM(c1) AS "Plot UV", 
         SUM(c16) AS "ECPM_Null", SUM(c17) AS "ECPM_0_100", SUM(c18) AS "ECPM_100_200",
         SUM(c19) AS "ECPM_200_300", SUM(c20) AS "ECPM_300_400", SUM(c21) AS "ECPM_400_500", SUM(c22) AS "ECPM_500+",
@@ -28,20 +28,28 @@ SELECT * FROM (
         SUM(c4) AS "Ad UV", SUM(c5) AS "Ad Revenue", 
         SUM(c0) as total_amount, 1 as group_num_0, 1 as group_num
     FROM (
-        -- 1. 锁定时间范围内的广告消耗
+        -- 1. 消耗端 (AppsFlyer)：利用 AppID 精准拆分
         SELECT 
             ta_date_trunc('day', "#event_time", 1) AS "$__Date_Time",
+            CASE 
+                WHEN "te_ads_object"."app_id" = '6748138347' THEN 'iOS' 
+                WHEN "te_ads_object"."app_id" = 'com.solitairemanor.secrets' THEN 'Android' 
+                ELSE 'Unknown' 
+            END as "OS",
             SUM(CAST(cost AS DOUBLE)) as c0,
             0 as c1, 0 as c2, 0 as c3, 0 as c4, 0 as c5, 0 as c6, 0 as c7, 0 as c8, 0 as c9, 
             0 as c10, 0 as c11, 0 as c12, 0 as c13, 0 as c14, 0 as c15, 0 as c16, 0 as c17, 
             0 as c18, 0 as c19, 0 as c20, 0 as c21, 0 as c22, 0 as c23
         FROM v_event_{project_id}
         WHERE "$part_event" = 'appsflyer_master_data' AND "$part_date" BETWEEN '{start_date}' AND '{end_date}'
-        GROUP BY 1
+        GROUP BY 1, 2
+
         UNION ALL
-        -- 2. 统计这批新增用户从激活到今日(Today)的所有累积行为
+
+        -- 2. 行为端 (Game Logs)：利用日志 #os 拆分
         SELECT 
             ta_date_trunc('day', ta_u.inst_t, 1) AS "$__Date_Time",
+            ta_u.os_val as "OS",
             0 as c0,
             CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'first_finish_plot', ta_ev."#user_id"))) AS DOUBLE) c1,
             CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '10', ta_ev."#user_id"))) AS DOUBLE) c2,
@@ -73,25 +81,31 @@ SELECT * FROM (
               AND "$part_date" BETWEEN '{start_date}' AND '{today_str}' 
         ) ta_ev 
         INNER JOIN (
-            SELECT ev."#user_id", u."app_version_first" AS v_first, min(ev."#event_time") AS inst_t, arbitrary(u.first_rv_ecpm) as ecpm
+            SELECT ev."#user_id", 
+                   CASE 
+                       WHEN LOWER(ev."#os") LIKE '%%ios%%' THEN 'iOS' 
+                       ELSE 'Android' 
+                   END as os_val,
+                   min(ev."#event_time") AS inst_t, 
+                   arbitrary(u.first_rv_ecpm) as ecpm,
+                   u."app_version_first" AS v_first
             FROM v_event_{project_id} ev
             LEFT JOIN v_user_{project_id} u ON ev."#user_id" = u."#user_id"
             WHERE ev."$part_event" = 'first_finish_plot' AND ev."$part_date" BETWEEN '{start_date}' AND '{end_date}'
-            GROUP BY 1, 2
+            GROUP BY 1, 2, 5
         ) ta_u ON ta_ev."#user_id" = ta_u."#user_id"
         WHERE ta_ev."#app_version" = ta_u.v_first
-        GROUP BY 1
+        GROUP BY 1, 2
     )
-    WHERE "$__Date_Time" >= TIMESTAMP '{start_date}' AND "$__Date_Time" < date_add('day', 1, TIMESTAMP '{end_date}')
-    GROUP BY 1
+    GROUP BY 1, 2, 3, 4
 )
-ORDER BY "Date" DESC
+ORDER BY "Date" DESC, "OS" ASC
 """
 
     @staticmethod
     def get_advertising_report_sql(project_id, start_date, end_date, dimension="campaign_name"):
         """
-        广告层级 SQL (Cohort 模式)：同步重构以对齐汇总口径。
+        广告层级 SQL (保持原逻辑，因为广告层级自带 te_ads_object，通常已有 OS 属性)
         """
         today_str = datetime.date.today().strftime('%Y-%m-%d')
         field_mapping = {"广告计划": "campaign_name", "广告组": "ad_group_name", "广告创意": "ad_name"}
@@ -135,7 +149,6 @@ SELECT * FROM (
                 arbitrary(internal_amount_22) internal_amount_22, arbitrary(internal_amount_23) internal_amount_23,
                 array_agg(os_val) FILTER (WHERE os_val IS NOT NULL) as all_os
             FROM (
-                -- 消耗(Event Time)
                 SELECT 
                     CASE WHEN "te_ads_object" IS NULL OR {dim_raw} IS NULL THEN '自然量' ELSE {dim_raw} END AS group_0,
                     CASE WHEN "te_ads_object" IS NULL OR "te_ads_object"."media_source" IS NULL THEN 'Organic' ELSE "te_ads_object"."media_source" END AS media_source,
@@ -151,7 +164,6 @@ SELECT * FROM (
                 WHERE "$part_event" = 'appsflyer_master_data' AND "$part_date" BETWEEN '{start_date}' AND '{end_date}'
                 GROUP BY 1, 2, 3
                 UNION ALL
-                -- 行为(Cohort Time, 统计至今日)
                 SELECT 
                     ta_u.group_0, ta_u.media_source, ta_date_trunc('day', ta_u.inst_t, 1) AS "$__Date_Time",
                     NULL internal_amount_0,
