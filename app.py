@@ -106,7 +106,7 @@ if "cohort_df_analysed" in st.session_state:
 
     st.subheader("维度穿透视图")
     view_cols_wanted = [
-        'Date', 'OS', 'Dimension Value', 'Cost', 'Total Revenue',
+        'Date', 'OS', 'Dimension Value', 'Cost', 'Total Revenue', 'IAP Revenue',
         'ROI', 'CPA_Plot', 'IAP UV', 'CPP_Pay', 'L20_Pass_Rate', 'CPA_L20', 'PUR'
     ]
     display_cols = [c for c in view_cols_wanted if c in df_analysed.columns]
@@ -132,7 +132,7 @@ if "cohort_df_analysed" in st.session_state:
     }
     display_df = df_view[display_cols].rename(columns={k: v for k, v in rename_map.items() if k in display_cols})
     format_map = {
-        'Cost': '${:,.2f}', 'Total Revenue': '${:,.2f}', 'ROI': '{:.2%}',
+        'Cost': '${:,.2f}', 'Total Revenue': '${:,.2f}', 'IAP Revenue': '${:,.2f}', 'ROI': '{:.2%}',
         '激活成本': '${:.2f}', 'IAP UV': '{:,.0f}', '付费成本': '${:.2f}',
         '20关通过率': '{:.2%}', '20关成本': '${:.2f}', '付费率': '{:.2%}'
     }
