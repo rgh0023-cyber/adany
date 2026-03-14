@@ -33,16 +33,48 @@ def _check_login(username, password):
 if not st.session_state["logged_in"]:
     st.title("ROI 智能分析系统 — 登录")
     with st.form("login_form"):
-        login_user = st.text_input("用户名")
-        login_pass = st.text_input("密码", type="password")
+        login_user = st.text_input(
+            "用户名",
+            value=st.session_state.get("last_login_username", ""),
+            key="login_username_input",
+        )
+        login_pass = st.text_input(
+            "密码",
+            type="password",
+            value=st.session_state.get("last_login_password", ""),
+            key="login_password_input",
+        )
         submitted = st.form_submit_button("登录")
         if submitted:
             if _check_login(login_user, login_pass):
                 st.session_state["logged_in"] = True
+                st.session_state["last_login_username"] = login_user
+                st.session_state["last_login_password"] = login_pass
                 st.rerun()
             else:
                 st.error("用户名或密码错误")
     st.stop()
+
+# --- 移动端适配：小屏下优化侧边栏、字号与表格 ---
+MOBILE_CSS = """
+<style>
+@media (max-width: 768px) {
+    /* 主内容区减少左右边距，便于窄屏阅读 */
+    [data-testid="stAppViewContainer"] { padding: 0.5rem; }
+    /* 侧边栏在窄屏时更容易触控 */
+    [data-testid="stSidebar"] { min-width: 260px; }
+    [data-testid="stSidebar"] .stButton > button { width: 100%; }
+    /* 指标卡片和按钮占满可用宽度 */
+    [data-testid="stVerticalBlock"] > div [data-testid="stMetric"] { min-width: 0; }
+    [data-testid="column"] { min-width: 0; }
+    /* 表格横向滚动，避免撑破布局 */
+    [data-testid="stDataFrame"] { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    /* 多选、输入等触控区域稍大 */
+    .stMultiSelect, .stTextInput, .stNumberInput { font-size: 16px; }
+}
+</style>
+"""
+st.markdown(MOBILE_CSS, unsafe_allow_html=True)
 
 # --- 2. 侧边栏配置 ---
 def _get_token():
