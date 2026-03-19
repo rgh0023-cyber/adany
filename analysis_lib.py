@@ -30,7 +30,7 @@ SELECT * FROM (
     FROM (
         -- 1. 锁定时间范围内的广告消耗（按 te_ads_object.app_id 区分 iOS/Android，第三方数据）
         SELECT 
-            ta_date_trunc('day', "#event_time", 1) AS "$__Date_Time",
+            ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce("#zone_offset", 0) AS INTEGER), "#event_time"), 1) AS "$__Date_Time",
             CASE WHEN te_ads_object.app_id = 'id6748138347' THEN 'iOS'
                  WHEN te_ads_object.app_id = 'com.solitairemanor.secrets' THEN 'Android'
                  ELSE 'Unknown' END AS "$__OS",
@@ -39,7 +39,10 @@ SELECT * FROM (
             0 as c10, 0 as c11, 0 as c12, 0 as c13, 0 as c14, 0 as c15, 0 as c16, 0 as c17, 
             0 as c18, 0 as c19, 0 as c20, 0 as c21, 0 as c22, 0 as c23
         FROM v_event_{project_id}
-        WHERE "$part_event" = 'appsflyer_master_data' AND "$part_date" BETWEEN '{start_date}' AND '{end_date}'
+        WHERE "$part_event" = 'appsflyer_master_data'
+          AND "$part_date" >= '2026-01-01'
+          AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce("#zone_offset", 0) AS INTEGER), "#event_time"), 1) >= TIMESTAMP '{start_date}'
+          AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce("#zone_offset", 0) AS INTEGER), "#event_time"), 1) < date_add('day', 1, TIMESTAMP '{end_date}')
         GROUP BY 1, 2
         UNION ALL
         -- 2. 统计这批新增用户从激活到今日的累积行为（按 #os 区分，与广告分层一致）
@@ -74,16 +77,22 @@ SELECT * FROM (
             SELECT "#user_id", "$part_event", "level_id", "ad_format", "revenue", "iap_product_currency", "#app_version"
             FROM v_event_{project_id} 
             WHERE "$part_event" IN ('first_enter_plot', 'level_start', 'applovin_ad_revenue_impression_level', 'iap_recharge_succeed')
-              AND "$part_date" BETWEEN '{start_date}' AND '{today_str}' 
+              AND "$part_date" >= '2026-01-01'
+              AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce("#zone_offset", 0) AS INTEGER), "#event_time"), 1) >= TIMESTAMP '{start_date}'
+              AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce("#zone_offset", 0) AS INTEGER), "#event_time"), 1) < date_add('day', 1, TIMESTAMP '{today_str}')
         ) ta_ev 
         INNER JOIN (
-            SELECT ev."#user_id", u."app_version_first" AS v_first, min(ev."#event_time") AS inst_t, arbitrary(u.first_rv_ecpm) as ecpm,
+            SELECT ev."#user_id", u."app_version_first" AS v_first, min(date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time")) AS inst_t, arbitrary(u.first_rv_ecpm) as ecpm,
                    CASE WHEN lower(COALESCE(CAST(arbitrary(ev."#os") AS VARCHAR), '')) IN ('ios', 'apple') THEN 'iOS'
                         WHEN lower(COALESCE(CAST(arbitrary(ev."#os") AS VARCHAR), '')) IN ('android') THEN 'Android'
                         ELSE 'Unknown' END AS os_display
             FROM v_event_{project_id} ev
             LEFT JOIN v_user_{project_id} u ON ev."#user_id" = u."#user_id"
-            WHERE ev."$part_event" = 'first_enter_plot' AND ev."$part_date" BETWEEN '{start_date}' AND '{end_date}' AND u."is_test" = false
+            WHERE ev."$part_event" = 'first_enter_plot'
+              AND ev."$part_date" >= '2026-01-01'
+              AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time"), 1) >= TIMESTAMP '{start_date}'
+              AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time"), 1) < date_add('day', 1, TIMESTAMP '{end_date}')
+              AND u."is_test" = false
             GROUP BY 1, 2
         ) ta_u ON ta_ev."#user_id" = ta_u."#user_id"
         WHERE ta_ev."#app_version" = ta_u.v_first
@@ -146,7 +155,7 @@ SELECT * FROM (
                 SELECT 
                     CASE WHEN "te_ads_object" IS NULL OR {dim_raw} IS NULL THEN '自然量' ELSE {dim_raw} END AS group_0,
                     CASE WHEN "te_ads_object" IS NULL OR "te_ads_object"."media_source" IS NULL THEN 'Organic' ELSE "te_ads_object"."media_source" END AS media_source,
-                    ta_date_trunc('day', "#event_time", 1) AS "$__Date_Time",
+                    ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce("#zone_offset", 0) AS INTEGER), "#event_time"), 1) AS "$__Date_Time",
                     CAST(coalesce(SUM(CAST(cost AS DOUBLE)), 0) AS DOUBLE) internal_amount_0,
                     NULL internal_amount_1, NULL internal_amount_2, NULL internal_amount_3, NULL internal_amount_4, 
                     NULL internal_amount_5, NULL internal_amount_6, NULL internal_amount_7, NULL internal_amount_8, 
@@ -155,7 +164,10 @@ SELECT * FROM (
                     NULL internal_amount_17, NULL internal_amount_18, NULL internal_amount_19, NULL internal_amount_20, 
                     NULL internal_amount_21, NULL internal_amount_22, NULL internal_amount_23, NULL as os_val
                 FROM v_event_{project_id} 
-                WHERE "$part_event" = 'appsflyer_master_data' AND "$part_date" BETWEEN '{start_date}' AND '{end_date}'
+                WHERE "$part_event" = 'appsflyer_master_data'
+                  AND "$part_date" >= '2026-01-01'
+                  AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce("#zone_offset", 0) AS INTEGER), "#event_time"), 1) >= TIMESTAMP '{start_date}'
+                  AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce("#zone_offset", 0) AS INTEGER), "#event_time"), 1) < date_add('day', 1, TIMESTAMP '{end_date}')
                 GROUP BY 1, 2, 3
                 UNION ALL
                 -- 行为(Cohort Time, 统计至今日)
@@ -190,16 +202,22 @@ SELECT * FROM (
                     SELECT "#user_id", "$part_event", "level_id", "ad_format", "revenue", "iap_product_currency", "#app_version"
                     FROM v_event_{project_id} 
                     WHERE "$part_event" IN ('first_enter_plot', 'level_start', 'applovin_ad_revenue_impression_level', 'iap_recharge_succeed')
-                      AND "$part_date" BETWEEN '{start_date}' AND '{today_str}' 
+                      AND "$part_date" >= '2026-01-01'
+                      AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce("#zone_offset", 0) AS INTEGER), "#event_time"), 1) >= TIMESTAMP '{start_date}'
+                      AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce("#zone_offset", 0) AS INTEGER), "#event_time"), 1) < date_add('day', 1, TIMESTAMP '{today_str}')
                 ) ta_ev 
                 INNER JOIN (
                     SELECT ev."#user_id", 
                         CASE WHEN u."te_ads_object" IS NULL OR {dim_with_u} IS NULL THEN '自然量' ELSE {dim_with_u} END AS group_0, 
                         CASE WHEN u."te_ads_object" IS NULL OR u."te_ads_object"."media_source" IS NULL THEN 'Organic' ELSE u."te_ads_object"."media_source" END AS media_source,
-                        u."app_version_first" AS v_first, min(ev."#event_time") AS inst_t, arbitrary(ev."#os") as os_val, arbitrary(u.first_rv_ecpm) as ecpm
+                        u."app_version_first" AS v_first, min(date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time")) AS inst_t, arbitrary(ev."#os") as os_val, arbitrary(u.first_rv_ecpm) as ecpm
                     FROM v_event_{project_id} ev
                     LEFT JOIN v_user_{project_id} u ON ev."#user_id" = u."#user_id"
-                    WHERE ev."$part_event" = 'first_enter_plot' AND ev."$part_date" BETWEEN '{start_date}' AND '{end_date}' AND u."is_test" = false
+                    WHERE ev."$part_event" = 'first_enter_plot'
+                      AND ev."$part_date" >= '2026-01-01'
+                      AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time"), 1) >= TIMESTAMP '{start_date}'
+                      AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time"), 1) < date_add('day', 1, TIMESTAMP '{end_date}')
+                      AND u."is_test" = false
                     GROUP BY 1, 2, 3, 4
                 ) ta_u ON ta_ev."#user_id" = ta_u."#user_id"
                 WHERE ta_ev."#app_version" = ta_u.v_first
