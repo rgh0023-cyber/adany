@@ -30,7 +30,7 @@ SELECT * FROM (
     FROM (
         -- 1. 锁定时间范围内的广告消耗（按 te_ads_object.app_id 区分 iOS/Android，第三方数据）
         SELECT 
-            ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce("#zone_offset", 0) AS INTEGER), "#event_time"), 1) AS "$__Date_Time",
+            ta_date_trunc('day', "#event_time", 1) AS "$__Date_Time",
             CASE WHEN te_ads_object.app_id = 'id6748138347' THEN 'iOS'
                  WHEN te_ads_object.app_id = 'com.solitairemanor.secrets' THEN 'Android'
                  ELSE 'Unknown' END AS "$__OS",
@@ -41,8 +41,8 @@ SELECT * FROM (
         FROM v_event_{project_id}
         WHERE "$part_event" = 'appsflyer_master_data'
           AND "$part_date" >= '2026-01-01'
-          AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce("#zone_offset", 0) AS INTEGER), "#event_time"), 1) >= TIMESTAMP '{start_date}'
-          AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce("#zone_offset", 0) AS INTEGER), "#event_time"), 1) < date_add('day', 1, TIMESTAMP '{end_date}')
+          AND ta_date_trunc('day', "#event_time", 1) >= TIMESTAMP '{start_date}'
+          AND ta_date_trunc('day', "#event_time", 1) < date_add('day', 1, TIMESTAMP '{end_date}')
         GROUP BY 1, 2
         UNION ALL
         -- 2. 统计这批新增用户从激活到今日的累积行为（按 #os 区分，与广告分层一致）
@@ -155,7 +155,7 @@ SELECT * FROM (
                 SELECT 
                     CASE WHEN "te_ads_object" IS NULL OR {dim_raw} IS NULL THEN '自然量' ELSE {dim_raw} END AS group_0,
                     CASE WHEN "te_ads_object" IS NULL OR "te_ads_object"."media_source" IS NULL THEN 'Organic' ELSE "te_ads_object"."media_source" END AS media_source,
-                    ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce("#zone_offset", 0) AS INTEGER), "#event_time"), 1) AS "$__Date_Time",
+                    ta_date_trunc('day', "#event_time", 1) AS "$__Date_Time",
                     CAST(coalesce(SUM(CAST(cost AS DOUBLE)), 0) AS DOUBLE) internal_amount_0,
                     NULL internal_amount_1, NULL internal_amount_2, NULL internal_amount_3, NULL internal_amount_4, 
                     NULL internal_amount_5, NULL internal_amount_6, NULL internal_amount_7, NULL internal_amount_8, 
@@ -166,8 +166,8 @@ SELECT * FROM (
                 FROM v_event_{project_id} 
                 WHERE "$part_event" = 'appsflyer_master_data'
                   AND "$part_date" >= '2026-01-01'
-                  AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce("#zone_offset", 0) AS INTEGER), "#event_time"), 1) >= TIMESTAMP '{start_date}'
-                  AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce("#zone_offset", 0) AS INTEGER), "#event_time"), 1) < date_add('day', 1, TIMESTAMP '{end_date}')
+                  AND ta_date_trunc('day', "#event_time", 1) >= TIMESTAMP '{start_date}'
+                  AND ta_date_trunc('day', "#event_time", 1) < date_add('day', 1, TIMESTAMP '{end_date}')
                 GROUP BY 1, 2, 3
                 UNION ALL
                 -- 行为(Cohort Time, 统计至今日)
