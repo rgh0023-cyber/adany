@@ -227,15 +227,9 @@ with st.sidebar:
     st.markdown("---")
     if st.button("退出登录", use_container_width=True):
         st.session_state["logged_in"] = False
-        if "cohort_df_analysed" in st.session_state:
-            del st.session_state["cohort_df_analysed"]
-            del st.session_state["cohort_df_raw"]
-            del st.session_state["cohort_start_s"]
-            del st.session_state["cohort_end_s"]
-            del st.session_state["cohort_dim_choice"]
         st.rerun()
 
-# --- 3. 核心逻辑：点击查询时执行并写入 session_state，之后仅用筛选改展示 ---
+# --- 3. 核心逻辑：仅在点击按钮时实时查询并展示（不缓存查询结果） ---
 if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
     if not token:
         st.warning("⚠️ 请先在侧边栏输入 API Token")
@@ -257,23 +251,6 @@ if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
         st.info("📭 该范围内暂无新增用户数据")
         st.stop()
     df_analysed = DataAnalyser.perform_business_analysis(df_raw)
-    st.session_state["cohort_df_raw"] = df_raw
-    st.session_state["cohort_df_analysed"] = df_analysed
-    st.session_state["cohort_start_s"] = start_s
-    st.session_state["cohort_end_s"] = end_s
-    st.session_state["cohort_dim_choice"] = dim_choice
-    if "ai_interpret_result" in st.session_state:
-        del st.session_state["ai_interpret_result"]
-    if "ai_interpret_conversation" in st.session_state:
-        del st.session_state["ai_interpret_conversation"]
-
-# 有缓存结果时：始终展示结果区（卡片、筛选只改表格，其他不动）
-if "cohort_df_analysed" in st.session_state:
-    df_raw = st.session_state["cohort_df_raw"]
-    df_analysed = st.session_state["cohort_df_analysed"].copy()
-    start_s = st.session_state["cohort_start_s"]
-    end_s = st.session_state["cohort_end_s"]
-    dim_choice = st.session_state["cohort_dim_choice"]
     # 展示前兜底：若分析层未产出高质量占比，则用原始列在展示前算一列
     if "High_ECPM_Rate" not in df_analysed.columns:
         ecpm_cols = ['ECPM_100_200', 'ECPM_200_300', 'ECPM_300_400', 'ECPM_400_500', 'ECPM_500+']
