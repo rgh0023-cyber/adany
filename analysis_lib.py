@@ -47,7 +47,7 @@ SELECT * FROM (
             ta_date_trunc('day', ta_u.inst_t, 1) AS "$__Date_Time",
             ta_u.os_display AS "$__OS",
             0 as c0,
-            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'first_finish_plot', ta_ev."#user_id"))) AS DOUBLE) c1,
+            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'first_enter_plot', ta_ev."#user_id"))) AS DOUBLE) c1,
             CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '10', ta_ev."#user_id"))) AS DOUBLE) c2,
             CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '20', ta_ev."#user_id"))) AS DOUBLE) c3,
             CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'applovin_ad_revenue_impression_level' AND ta_ev.ad_format IN ('REWARDED','INTER'), ta_ev."#user_id"))) AS DOUBLE) c4,
@@ -73,7 +73,7 @@ SELECT * FROM (
         FROM (
             SELECT "#user_id", "$part_event", "level_id", "ad_format", "revenue", "iap_product_currency", "#app_version"
             FROM v_event_{project_id} 
-            WHERE "$part_event" IN ('first_finish_plot', 'level_start', 'applovin_ad_revenue_impression_level', 'iap_recharge_succeed')
+            WHERE "$part_event" IN ('first_enter_plot', 'level_start', 'applovin_ad_revenue_impression_level', 'iap_recharge_succeed')
               AND "$part_date" BETWEEN '{start_date}' AND '{today_str}' 
         ) ta_ev 
         INNER JOIN (
@@ -83,7 +83,7 @@ SELECT * FROM (
                         ELSE 'Unknown' END AS os_display
             FROM v_event_{project_id} ev
             LEFT JOIN v_user_{project_id} u ON ev."#user_id" = u."#user_id"
-            WHERE ev."$part_event" = 'first_finish_plot' AND ev."$part_date" BETWEEN '{start_date}' AND '{end_date}'
+            WHERE ev."$part_event" = 'first_enter_plot' AND ev."$part_date" BETWEEN '{start_date}' AND '{end_date}'
             GROUP BY 1, 2
         ) ta_u ON ta_ev."#user_id" = ta_u."#user_id"
         WHERE ta_ev."#app_version" = ta_u.v_first
@@ -162,7 +162,7 @@ SELECT * FROM (
                 SELECT 
                     ta_u.group_0, ta_u.media_source, ta_date_trunc('day', ta_u.inst_t, 1) AS "$__Date_Time",
                     NULL internal_amount_0,
-                    CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'first_finish_plot', ta_ev."#user_id"))) AS DOUBLE) internal_amount_1,
+                    CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'first_enter_plot', ta_ev."#user_id"))) AS DOUBLE) internal_amount_1,
                     CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '10', ta_ev."#user_id"))) AS DOUBLE) internal_amount_2,
                     CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '20', ta_ev."#user_id"))) AS DOUBLE) internal_amount_3,
                     CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'applovin_ad_revenue_impression_level' AND ta_ev.ad_format IN ('REWARDED','INTER'), ta_ev."#user_id"))) AS DOUBLE) internal_amount_4,
@@ -189,7 +189,7 @@ SELECT * FROM (
                 FROM (
                     SELECT "#user_id", "$part_event", "level_id", "ad_format", "revenue", "iap_product_currency", "#app_version"
                     FROM v_event_{project_id} 
-                    WHERE "$part_event" IN ('first_finish_plot', 'level_start', 'applovin_ad_revenue_impression_level', 'iap_recharge_succeed')
+                    WHERE "$part_event" IN ('first_enter_plot', 'level_start', 'applovin_ad_revenue_impression_level', 'iap_recharge_succeed')
                       AND "$part_date" BETWEEN '{start_date}' AND '{today_str}' 
                 ) ta_ev 
                 INNER JOIN (
@@ -199,7 +199,7 @@ SELECT * FROM (
                         u."app_version_first" AS v_first, min(ev."#event_time") AS inst_t, arbitrary(ev."#os") as os_val, arbitrary(u.first_rv_ecpm) as ecpm
                     FROM v_event_{project_id} ev
                     LEFT JOIN v_user_{project_id} u ON ev."#user_id" = u."#user_id"
-                    WHERE ev."$part_event" = 'first_finish_plot' AND ev."$part_date" BETWEEN '{start_date}' AND '{end_date}'
+                    WHERE ev."$part_event" = 'first_enter_plot' AND ev."$part_date" BETWEEN '{start_date}' AND '{end_date}'
                     GROUP BY 1, 2, 3, 4
                 ) ta_u ON ta_ev."#user_id" = ta_u."#user_id"
                 WHERE ta_ev."#app_version" = ta_u.v_first
