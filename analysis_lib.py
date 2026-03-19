@@ -83,7 +83,7 @@ SELECT * FROM (
                         ELSE 'Unknown' END AS os_display
             FROM v_event_{project_id} ev
             LEFT JOIN v_user_{project_id} u ON ev."#user_id" = u."#user_id"
-            WHERE ev."$part_event" = 'first_enter_plot' AND ev."$part_date" BETWEEN '{start_date}' AND '{end_date}' AND u."is_test" = false
+            WHERE ev."$part_event" = 'first_enter_plot' AND ev."$part_date" BETWEEN '{start_date}' AND '{end_date}' AND u."is_test" = true
             GROUP BY 1, 2
         ) ta_u ON ta_ev."#user_id" = ta_u."#user_id"
         WHERE ta_ev."#app_version" = ta_u.v_first
@@ -199,7 +199,7 @@ SELECT * FROM (
                         u."app_version_first" AS v_first, min(ev."#event_time") AS inst_t, arbitrary(ev."#os") as os_val, arbitrary(u.first_rv_ecpm) as ecpm
                     FROM v_event_{project_id} ev
                     LEFT JOIN v_user_{project_id} u ON ev."#user_id" = u."#user_id"
-                    WHERE ev."$part_event" = 'first_enter_plot' AND ev."$part_date" BETWEEN '{start_date}' AND '{end_date}' AND u."is_test" = false
+                    WHERE ev."$part_event" = 'first_enter_plot' AND ev."$part_date" BETWEEN '{start_date}' AND '{end_date}' AND u."is_test" = true
                     GROUP BY 1, 2, 3, 4
                 ) ta_u ON ta_ev."#user_id" = ta_u."#user_id"
                 WHERE ta_ev."#app_version" = ta_u.v_first
