@@ -53,8 +53,22 @@ class AdAnalysis:
             f"WHEN lower(trim(coalesce(cast({U}.\"ad_name\" AS VARCHAR), ''))) IN ('-', '') THEN '自然量' "
             f"ELSE {U}.\"ad_name\" END"
         )
-        media_e = f"CASE WHEN {E} IS NULL OR {E}.\"media_source\" IS NULL THEN 'organic' ELSE {E}.\"media_source\" END"
-        media_u = f"CASE WHEN {U} IS NULL OR {U}.\"media_source\" IS NULL THEN 'organic' ELSE {U}.\"media_source\" END"
+        media_e = (
+            f"CASE WHEN {E} IS NULL "
+            f"OR lower(trim(coalesce(cast({E}.\"campaign_name\" AS VARCHAR), ''))) IN ('-', '') "
+            f"OR lower(trim(coalesce(cast({E}.\"ad_group_name\" AS VARCHAR), ''))) IN ('-', '') "
+            f"OR lower(trim(coalesce(cast({E}.\"ad_name\" AS VARCHAR), ''))) IN ('-', '') "
+            f"OR lower(trim(coalesce(cast({E}.\"media_source\" AS VARCHAR), ''))) IN ('-', '') "
+            f"THEN 'organic' ELSE {E}.\"media_source\" END"
+        )
+        media_u = (
+            f"CASE WHEN {U} IS NULL "
+            f"OR lower(trim(coalesce(cast({U}.\"campaign_name\" AS VARCHAR), ''))) IN ('-', '') "
+            f"OR lower(trim(coalesce(cast({U}.\"ad_group_name\" AS VARCHAR), ''))) IN ('-', '') "
+            f"OR lower(trim(coalesce(cast({U}.\"ad_name\" AS VARCHAR), ''))) IN ('-', '') "
+            f"OR lower(trim(coalesce(cast({U}.\"media_source\" AS VARCHAR), ''))) IN ('-', '') "
+            f"THEN 'organic' ELSE {U}.\"media_source\" END"
+        )
         os_e = (
             f"CASE WHEN {E}.app_id = 'id6748138347' THEN 'iOS' "
             f"WHEN {E}.app_id = 'com.solitairemanor.secrets' THEN 'Android' "
