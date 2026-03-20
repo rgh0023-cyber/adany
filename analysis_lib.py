@@ -40,17 +40,17 @@ class AdAnalysis:
         )
         camp_u = (
             f"CASE WHEN {U} IS NULL OR {U}.\"campaign_name\" IS NULL THEN '自然量' "
-            f"WHEN lower(trim(coalesce(cast({U}.\"campaign_name\" AS VARCHAR), ''))) IN ('-', '')) THEN '待核查' "
+            f"WHEN lower(trim(coalesce(cast({U}.\"campaign_name\" AS VARCHAR), ''))) IN ('-', '') THEN '待核查' "
             f"ELSE {U}.\"campaign_name\" END"
         )
         grp_u = (
             f"CASE WHEN {U} IS NULL OR {U}.\"ad_group_name\" IS NULL THEN '自然量' "
-            f"WHEN lower(trim(coalesce(cast({U}.\"ad_group_name\" AS VARCHAR), ''))) IN ('-', '')) THEN '待核查' "
+            f"WHEN lower(trim(coalesce(cast({U}.\"ad_group_name\" AS VARCHAR), ''))) IN ('-', '') THEN '待核查' "
             f"ELSE {U}.\"ad_group_name\" END"
         )
         cre_u = (
             f"CASE WHEN {U} IS NULL OR {U}.\"ad_name\" IS NULL THEN '自然量' "
-            f"WHEN lower(trim(coalesce(cast({U}.\"ad_name\" AS VARCHAR), ''))) IN ('-', '')) THEN '待核查' "
+            f"WHEN lower(trim(coalesce(cast({U}.\"ad_name\" AS VARCHAR), ''))) IN ('-', '') THEN '待核查' "
             f"ELSE {U}.\"ad_name\" END"
         )
         media_e = f"CASE WHEN {E} IS NULL OR {E}.\"media_source\" IS NULL THEN 'Organic' ELSE {E}.\"media_source\" END"
