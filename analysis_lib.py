@@ -130,7 +130,13 @@ SELECT * FROM (
                   AND "$part_date" >= '2026-01-01'
                   AND ta_date_trunc('day', "#event_time", 1) >= TIMESTAMP '{start_date}'
                   AND ta_date_trunc('day', "#event_time", 1) < date_add('day', 1, TIMESTAMP '{end_date}')
-                GROUP BY 1, 2, 3, 4, 5, 6
+                GROUP BY
+                    ta_u.dim_campaign,
+                    ta_u.dim_ad_group,
+                    ta_u.dim_ad_name,
+                    ta_u.media_source,
+                    ta_date_trunc('day', ta_u.inst_t, 1),
+                    ta_u.os_val
                 UNION ALL
                 -- 行为(Cohort Time, 统计至今日)
                 SELECT
