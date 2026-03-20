@@ -55,6 +55,16 @@ class AdAnalysis:
         )
         media_e = f"CASE WHEN {E} IS NULL OR {E}.\"media_source\" IS NULL THEN 'Organic' ELSE {E}.\"media_source\" END"
         media_u = f"CASE WHEN {U} IS NULL OR {U}.\"media_source\" IS NULL THEN 'Organic' ELSE {U}.\"media_source\" END"
+        os_e = (
+            f"CASE WHEN {E}.app_id = 'id6748138347' THEN 'iOS' "
+            f"WHEN {E}.app_id = 'com.solitairemanor.secrets' THEN 'Android' "
+            f"ELSE 'Unknown' END"
+        )
+        os_u = (
+            "CASE WHEN lower(COALESCE(CAST(arbitrary(ev.\"#os\") AS VARCHAR), '')) IN ('ios', 'apple') THEN 'iOS' "
+            "WHEN lower(COALESCE(CAST(arbitrary(ev.\"#os\") AS VARCHAR), '')) IN ('android') THEN 'Android' "
+            "ELSE 'Unknown' END"
+        )
 
         return f"""
 /* sessionProperties: {{"ignore_downstream_preferences":"true"}} */
@@ -65,7 +75,7 @@ SELECT * FROM (
             format_datetime("$__Date_Time", 'yyyy-MM-dd') AS "Date",
             dim_ad_name AS "Dimension Value",
             media_source AS "Media Source",
-            array_join(array_distinct(all_os), ', ') AS "OS",
+            os_val AS "OS",
             CAST(NULL AS VARCHAR) AS "维度名称_全部",
             dim_campaign AS "维度名称_广告计划",
             dim_ad_group AS "维度名称_广告组",
@@ -82,10 +92,10 @@ SELECT * FROM (
             CAST(coalesce(internal_amount_7, 0) AS DOUBLE)/100*0.7 AS "IAP Revenue",
             internal_amount_4 AS "Ad UV", internal_amount_5 AS "Ad Revenue",
             sum(IF(is_finite(internal_amount_0), internal_amount_0, 0)) OVER (
-                PARTITION BY "$__Date_Time", dim_campaign, dim_ad_group, dim_ad_name, media_source
+                PARTITION BY "$__Date_Time", dim_campaign, dim_ad_group, dim_ad_name, media_source, os_val
             ) as total_amount
         FROM (
-            SELECT dim_campaign, dim_ad_group, dim_ad_name, media_source, "$__Date_Time",
+            SELECT dim_campaign, dim_ad_group, dim_ad_name, media_source, os_val, "$__Date_Time",
                 arbitrary(internal_amount_0) internal_amount_0, arbitrary(internal_amount_1) internal_amount_1,
                 arbitrary(internal_amount_2) internal_amount_2, arbitrary(internal_amount_3) internal_amount_3,
                 arbitrary(internal_amount_4) internal_amount_4, arbitrary(internal_amount_5) internal_amount_5,
@@ -98,8 +108,7 @@ SELECT * FROM (
                 arbitrary(internal_amount_18) internal_amount_18, arbitrary(internal_amount_19) internal_amount_19,
                 arbitrary(internal_amount_20) internal_amount_20, arbitrary(internal_amount_21) internal_amount_21,
                 arbitrary(internal_amount_22) internal_amount_22, arbitrary(internal_amount_23) internal_amount_23,
-                arbitrary(internal_amount_24) internal_amount_24,
-                array_agg(os_val) FILTER (WHERE os_val IS NOT NULL) as all_os
+                arbitrary(internal_amount_24) internal_amount_24
             FROM (
                 -- 消耗(Event Time)，与行为侧同一五维分组键
                 SELECT
@@ -115,7 +124,7 @@ SELECT * FROM (
                     NULL internal_amount_13, NULL internal_amount_14, NULL internal_amount_15, NULL internal_amount_16,
                     NULL internal_amount_17, NULL internal_amount_18, NULL internal_amount_19, NULL internal_amount_20,
                     NULL internal_amount_21, NULL internal_amount_22, NULL internal_amount_23,
-                    NULL internal_amount_24, NULL as os_val
+                    NULL internal_amount_24, {os_e} as os_val
                 FROM v_event_{project_id}
                 WHERE "$part_event" = 'appsflyer_master_data'
                   AND "$part_date" >= '2026-01-01'
@@ -152,7 +161,7 @@ SELECT * FROM (
                     CAST(COUNT(DISTINCT (IF(ta_u.ecpm >= 500, ta_ev."#user_id"))) AS DOUBLE) internal_amount_22,
                     CAST(COUNT(IF(ta_ev."$part_event" = 'iap_recharge_succeed', 1)) AS DOUBLE) internal_amount_23,
                     CAST(COUNT(DISTINCT (IF(ta_u.first_iap_t IS NOT NULL AND ta_date_trunc('day', ta_u.first_iap_t, 1) = ta_date_trunc('day', ta_u.inst_t, 1), ta_ev."#user_id"))) AS DOUBLE) internal_amount_24,
-                    arbitrary(ta_u.os_val) as os_val
+                    ta_u.os_val as os_val
                 FROM (
                     SELECT "#user_id", "$part_event", "level_id", "ad_format", "revenue", "iap_product_currency", "#app_version"
                     FROM v_event_{project_id}
@@ -172,7 +181,7 @@ SELECT * FROM (
                             {media_u} AS media_source,
                             u."app_version_first" AS v_first,
                             min(date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time")) AS inst_t,
-                            arbitrary(ev."#os") as os_val,
+                            {os_u} as os_val,
                             arbitrary(u.first_rv_ecpm) as ecpm
                         FROM v_event_{project_id} ev
                         LEFT JOIN v_user_{project_id} u ON ev."#user_id" = u."#user_id"
@@ -195,10 +204,10 @@ SELECT * FROM (
                     ) fi ON cohort."#user_id" = fi."#user_id" AND cohort.v_first = fi.v_first
                 ) ta_u ON ta_ev."#user_id" = ta_u."#user_id"
                 WHERE ta_ev."#app_version" = ta_u.v_first
-                GROUP BY 1, 2, 3, 4, 5
+                GROUP BY 1, 2, 3, 4, 5, 6
             )
             WHERE "$__Date_Time" >= TIMESTAMP '{start_date}' AND "$__Date_Time" < date_add('day', 1, TIMESTAMP '{end_date}')
-            GROUP BY dim_campaign, dim_ad_group, dim_ad_name, media_source, "$__Date_Time"
+            GROUP BY dim_campaign, dim_ad_group, dim_ad_name, media_source, os_val, "$__Date_Time"
         )
         WHERE (internal_amount_0 > 0 OR internal_amount_1 > 0)
     )
