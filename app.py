@@ -514,6 +514,17 @@ if "cohort_df_analysed" in st.session_state:
         selected_os = st.multiselect("筛选 OS", options=options_os, default=[], key="filter_os")
         if selected_os:
             df_view = df_view[df_view['OS'].astype(str).isin(selected_os)]
+    # 广告层级支持按上层维度筛选
+    if dim_choice in ("广告组", "广告创意") and '维度名称_广告计划' in df_view.columns:
+        options_plan = sorted(df_view['维度名称_广告计划'].dropna().astype(str).unique().tolist())
+        selected_plan = st.multiselect("筛选 广告计划", options=options_plan, default=[], key="filter_plan")
+        if selected_plan:
+            df_view = df_view[df_view['维度名称_广告计划'].astype(str).isin(selected_plan)]
+    if dim_choice == "广告创意" and '维度名称_广告组' in df_view.columns:
+        options_group = sorted(df_view['维度名称_广告组'].dropna().astype(str).unique().tolist())
+        selected_group = st.multiselect("筛选 广告组", options=options_group, default=[], key="filter_group")
+        if selected_group:
+            df_view = df_view[df_view['维度名称_广告组'].astype(str).isin(selected_group)]
     if 'Dimension Value' in df_analysed.columns:
         options_dim = sorted(df_analysed['Dimension Value'].dropna().astype(str).unique().tolist())
         selected_dim = st.multiselect("筛选 维度名称", options=options_dim, default=[], key="filter_dim")
@@ -555,12 +566,23 @@ if "cohort_df_analysed" in st.session_state:
         if "OS" in df_src.columns:
             raw_options_os = sorted(df_src["OS"].dropna().astype(str).unique().tolist())
             raw_selected_os = st.multiselect("筛选 OS（原始表）", options=raw_options_os, default=[], key="filter_raw_os")
-        if "Dimension Value" in df_src.columns:
-            raw_options_dim = sorted(df_src["Dimension Value"].dropna().astype(str).unique().tolist())
-            raw_selected_dim = st.multiselect("筛选 维度名称（原始表）", options=raw_options_dim, default=[], key="filter_raw_dim")
         df_raw_display = df_src.copy()
         if raw_selected_os and "OS" in df_raw_display.columns:
             df_raw_display = df_raw_display[df_raw_display["OS"].astype(str).isin(raw_selected_os)]
+        # 原始表同样支持广告上层维度筛选
+        if dim_choice in ("广告组", "广告创意") and "维度名称_广告计划" in df_raw_display.columns:
+            raw_options_plan = sorted(df_raw_display["维度名称_广告计划"].dropna().astype(str).unique().tolist())
+            raw_selected_plan = st.multiselect("筛选 广告计划（原始表）", options=raw_options_plan, default=[], key="filter_raw_plan")
+            if raw_selected_plan:
+                df_raw_display = df_raw_display[df_raw_display["维度名称_广告计划"].astype(str).isin(raw_selected_plan)]
+        if dim_choice == "广告创意" and "维度名称_广告组" in df_raw_display.columns:
+            raw_options_group = sorted(df_raw_display["维度名称_广告组"].dropna().astype(str).unique().tolist())
+            raw_selected_group = st.multiselect("筛选 广告组（原始表）", options=raw_options_group, default=[], key="filter_raw_group")
+            if raw_selected_group:
+                df_raw_display = df_raw_display[df_raw_display["维度名称_广告组"].astype(str).isin(raw_selected_group)]
+        if "Dimension Value" in df_raw_display.columns:
+            raw_options_dim = sorted(df_raw_display["Dimension Value"].dropna().astype(str).unique().tolist())
+            raw_selected_dim = st.multiselect("筛选 维度名称（原始表）", options=raw_options_dim, default=[], key="filter_raw_dim")
         if raw_selected_dim and "Dimension Value" in df_raw_display.columns:
             df_raw_display = df_raw_display[df_raw_display["Dimension Value"].astype(str).isin(raw_selected_dim)]
         st.dataframe(df_raw_display, use_container_width=True)
