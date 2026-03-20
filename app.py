@@ -240,45 +240,46 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- 登录：未登录只显示登录框，验证通过后再显示主界面 ---
-if "logged_in" not in st.session_state:
-    st.session_state["logged_in"] = False
-
-def _check_login(username, password):
-    """从 Secrets 读取预期账号密码并校验（未配置则不允许登录）"""
-    try:
-        want_user = st.secrets.get("login_username", "")
-        want_pass = st.secrets.get("login_password", "")
-        if not want_user or not want_pass:
-            return False
-        return username == want_user and password == want_pass
-    except Exception:
-        return False
-
-if not st.session_state["logged_in"]:
-    st.title("ROI 智能分析系统 — 登录")
-    with st.form("login_form"):
-        login_user = st.text_input(
-            "用户名",
-            value=st.session_state.get("last_login_username", ""),
-            key="login_username_input",
-        )
-        login_pass = st.text_input(
-            "密码",
-            type="password",
-            value=st.session_state.get("last_login_password", ""),
-            key="login_password_input",
-        )
-        submitted = st.form_submit_button("登录")
-        if submitted:
-            if _check_login(login_user, login_pass):
-                st.session_state["logged_in"] = True
-                st.session_state["last_login_username"] = login_user
-                st.session_state["last_login_password"] = login_pass
-                st.rerun()
-            else:
-                st.error("用户名或密码错误")
-    st.stop()
+# --- 登录（临时关闭）---
+# if "logged_in" not in st.session_state:
+#     st.session_state["logged_in"] = False
+#
+# def _check_login(username, password):
+#     """从 Secrets 读取预期账号密码并校验（未配置则不允许登录）"""
+#     try:
+#         want_user = st.secrets.get("login_username", "")
+#         want_pass = st.secrets.get("login_password", "")
+#         if not want_user or not want_pass:
+#             return False
+#         return username == want_user and password == want_pass
+#     except Exception:
+#         return False
+#
+# if not st.session_state["logged_in"]:
+#     st.title("ROI 智能分析系统 — 登录")
+#     with st.form("login_form"):
+#         login_user = st.text_input(
+#             "用户名",
+#             value=st.session_state.get("last_login_username", ""),
+#             key="login_username_input",
+#         )
+#         login_pass = st.text_input(
+#             "密码",
+#             type="password",
+#             value=st.session_state.get("last_login_password", ""),
+#             key="login_password_input",
+#         )
+#         submitted = st.form_submit_button("登录")
+#         if submitted:
+#             if _check_login(login_user, login_pass):
+#                 st.session_state["logged_in"] = True
+#                 st.session_state["last_login_username"] = login_user
+#                 st.session_state["last_login_password"] = login_pass
+#                 st.rerun()
+#             else:
+#                 st.error("用户名或密码错误")
+#     st.stop()
+st.session_state["logged_in"] = True
 
 # --- 移动端适配：小屏下优化侧边栏、字号与表格 ---
 MOBILE_CSS = """
