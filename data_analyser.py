@@ -30,9 +30,12 @@ class DataAnalyser:
         df['CPP_Pay'] = (df['Cost'] / df['IAP UV']).replace([np.inf, -np.inf], 0).fillna(0)
         
         # 3. 辅助质量指标 (Cohort 深度)
-        # 高价值用户占比 (ECPM > 300)
-        high_value_sum = df['ECPM_300_400'] + df['ECPM_400_500'] + df['ECPM_500+']
-        df['HV_Rate'] = (high_value_sum / df['Plot UV']).replace([np.inf, -np.inf], 0).fillna(0)
+        # 高质量占比 (ECPM > 300) ：展示这些用户占总激活人数的占比
+        high_ecpm_300_cols = ['ECPM_300_400', 'ECPM_400_500', 'ECPM_500+']
+        if all(c in df.columns for c in high_ecpm_300_cols) and 'Plot UV' in df.columns:
+            high_value_sum = df['ECPM_300_400'] + df['ECPM_400_500'] + df['ECPM_500+']
+            df['HV_Rate'] = np.where(df['Plot UV'] == 0, np.nan, high_value_sum / df['Plot UV'])
+            df['HV_Rate'] = df['HV_Rate'].replace([np.inf, -np.inf], np.nan)
         
         # 付费率 (PUR)
         df['PUR'] = (df['IAP UV'] / df['Plot UV']).replace([np.inf, -np.inf], 0).fillna(0)
@@ -43,6 +46,11 @@ class DataAnalyser:
             high_ecpm_sum = sum(df[c] for c in ecpm_100_cols)
             df['High_ECPM_Rate'] = np.where(df['Plot UV'] == 0, np.nan, high_ecpm_sum / df['Plot UV'])
             df['High_ECPM_Rate'] = df['High_ECPM_Rate'].replace([np.inf, -np.inf], np.nan)
+
+        # 超过质量占比 (ECPM > 500)
+        if 'ECPM_500+' in df.columns and 'Plot UV' in df.columns:
+            df['Over_ECPM_Rate'] = np.where(df['Plot UV'] == 0, np.nan, df['ECPM_500+'] / df['Plot UV'])
+            df['Over_ECPM_Rate'] = df['Over_ECPM_Rate'].replace([np.inf, -np.inf], np.nan)
         # 基于原始 SQL 列做衍生：仅当原始表存在对应列时才增加展示用列
         if 'L20 UV' in df.columns and 'Plot UV' in df.columns:
             # 20关通过率 = L20 UV / Plot UV，分母为0为空值

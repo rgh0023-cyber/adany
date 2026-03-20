@@ -519,7 +519,7 @@ if "cohort_df_analysed" in st.session_state:
     view_cols_wanted = [
         'Date', 'OS', 'Media Source',
         '维度名称_全部', '维度名称_广告计划', '维度名称_广告组', '维度名称_广告创意',
-        'Plot UV', 'Cost', 'High_ECPM_Rate', 'Total Revenue', 'IAP Revenue',
+        'Plot UV', 'Cost', 'High_ECPM_Rate', 'HV_Rate', 'Over_ECPM_Rate', 'Total Revenue', 'IAP Revenue',
         'ROI', 'CPA_Plot', 'IAP UV', 'IAP_UV_D0', 'CPP_Pay', 'L20_Pass_Rate', 'CPA_L20', 'PUR',
     ]
     display_cols = [c for c in view_cols_wanted if c in df_analysed.columns]
@@ -555,7 +555,9 @@ if "cohort_df_analysed" in st.session_state:
         '维度名称_广告组': '广告组',
         '维度名称_广告创意': '广告创意',
         'Plot UV': '激活人数',
-        'High_ECPM_Rate': '高质量占比',
+        'High_ECPM_Rate': '中高质量占比',
+        'HV_Rate': '高质量占比',
+        'Over_ECPM_Rate': '超过质量占比',
         'CPA_Plot': '激活成本',
         'CPP_Pay': '付费成本',
         'L20_Pass_Rate': '20关通过率',
@@ -565,7 +567,9 @@ if "cohort_df_analysed" in st.session_state:
     }
     display_df = df_view[display_cols].rename(columns={k: v for k, v in rename_map.items() if k in display_cols})
     format_map = {
-        'Cost': '${:,.2f}', '激活人数': '{:,.0f}', '高质量占比': '{:.1%}', 'Total Revenue': '${:,.2f}', 'IAP Revenue': '${:,.2f}',         'ROI': '{:.2%}',
+        'Cost': '${:,.2f}', '激活人数': '{:,.0f}',
+        '中高质量占比': '{:.1%}', '高质量占比': '{:.1%}', '超过质量占比': '{:.1%}',
+        'Total Revenue': '${:,.2f}', 'IAP Revenue': '${:,.2f}', 'ROI': '{:.2%}',
         '激活成本': '${:.2f}', 'IAP UV': '{:,.0f}', 'D0首充UV': '{:,.0f}', '付费成本': '${:.2f}',
         '20关通过率': '{:.2%}', '20关成本': '${:.2f}', '付费率': '{:.2%}'
     }
