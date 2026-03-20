@@ -28,7 +28,7 @@ def clean_sql_response(raw_text):
             'ECPM_Null', 'ECPM_0_100', 'ECPM_100_200', 'ECPM_200_300', 
             'ECPM_300_400', 'ECPM_400_500', 'ECPM_500+',
             'L10 UV', 'L20 UV', 'L30 UV', 'L40 UV', 'L50 UV', 'L60 UV', 'L70 UV', 'L80 UV', 'L90 UV', 'L100 UV',
-            'IAP UV', 'IAP Times', 'IAP Revenue', 'Ad UV', 'Ad Revenue', 'total_amount', 'group_num_0', 'group_num'
+            'IAP UV', 'IAP_UV_D0', 'IAP Times', 'IAP Revenue', 'Ad UV', 'Ad Revenue', 'total_amount', 'group_num_0', 'group_num'
         ]
 
         # 使用 StringIO 读取，显式指定引擎
@@ -56,7 +56,7 @@ def clean_sql_response(raw_text):
         df = df.applymap(clean_val)
 
         # 核心指标转数值
-        numeric_cols = ['Cost', 'IAP Revenue', 'Ad Revenue', 'Plot UV']
+        numeric_cols = ['Cost', 'IAP Revenue', 'Ad Revenue', 'Plot UV', 'IAP_UV_D0']
         for col in numeric_cols:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0.0)

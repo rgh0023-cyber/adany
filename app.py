@@ -40,7 +40,7 @@ def _build_data_summary(df):
     """基于本次查询全量数据（不按筛选），按总体 / OS / 维度名汇总，供 AI 解读"""
     if df is None or df.empty:
         return "（无数据）"
-    sum_cols = [c for c in ["Cost", "Total Revenue", "IAP Revenue", "Plot UV", "IAP UV", "L20 UV"] if c in df.columns]
+    sum_cols = [c for c in ["Cost", "Total Revenue", "IAP Revenue", "Plot UV", "IAP UV", "IAP_UV_D0", "L20 UV"] if c in df.columns]
     ecpm_cols = [c for c in ["ECPM_100_200", "ECPM_200_300", "ECPM_300_400", "ECPM_400_500", "ECPM_500+"] if c in df.columns]
     if sum_cols:
         sum_cols = sum_cols + ecpm_cols
@@ -60,6 +60,7 @@ def _build_data_summary(df):
         parts = [f"Cost={r.get('Cost', 0):.2f}", f"Total Revenue={r.get('Total Revenue', 0):.2f}"]
         if not pd.isna(r.get("ROI")): parts.append(f"ROI={r['ROI']:.2%}")
         parts.append(f"Plot UV={r.get('Plot UV', 0):.0f}"); parts.append(f"IAP UV={r.get('IAP UV', 0):.0f}")
+        if "IAP_UV_D0" in r.index: parts.append(f"IAP_UV_D0={r.get('IAP_UV_D0', 0):.0f}")
         if not pd.isna(r.get("L20_Pass_Rate")): parts.append(f"L20通过率={r['L20_Pass_Rate']:.1%}")
         if not pd.isna(r.get("High_ECPM_Rate")): parts.append(f"高质量占比={r['High_ECPM_Rate']:.1%}")
         return name + "： " + "，".join(parts)
@@ -357,7 +358,7 @@ if "cohort_df_analysed" in st.session_state:
     st.subheader("维度穿透视图")
     view_cols_wanted = [
         'Date', 'OS', 'Dimension Value', 'Cost', 'High_ECPM_Rate', 'Total Revenue', 'IAP Revenue',
-        'ROI', 'CPA_Plot', 'IAP UV', 'CPP_Pay', 'L20_Pass_Rate', 'CPA_L20', 'PUR'
+        'ROI', 'CPA_Plot', 'IAP UV', 'IAP_UV_D0', 'CPP_Pay', 'L20_Pass_Rate', 'CPA_L20', 'PUR'
     ]
     display_cols = [c for c in view_cols_wanted if c in df_analysed.columns]
     df_view = df_analysed.copy()
@@ -379,12 +380,13 @@ if "cohort_df_analysed" in st.session_state:
         'CPP_Pay': '付费成本',
         'L20_Pass_Rate': '20关通过率',
         'CPA_L20': '20关成本',
-        'PUR': '付费率'
+        'PUR': '付费率',
+        'IAP_UV_D0': 'D0首充UV'
     }
     display_df = df_view[display_cols].rename(columns={k: v for k, v in rename_map.items() if k in display_cols})
     format_map = {
         'Cost': '${:,.2f}', '高质量占比': '{:.1%}', 'Total Revenue': '${:,.2f}', 'IAP Revenue': '${:,.2f}', 'ROI': '{:.2%}',
-        '激活成本': '${:.2f}', 'IAP UV': '{:,.0f}', '付费成本': '${:.2f}',
+        '激活成本': '${:.2f}', 'IAP UV': '{:,.0f}', 'D0首充UV': '{:,.0f}', '付费成本': '${:.2f}',
         '20关通过率': '{:.2%}', '20关成本': '${:.2f}', '付费率': '{:.2%}'
     }
     st.dataframe(
