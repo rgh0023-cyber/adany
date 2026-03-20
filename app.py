@@ -89,6 +89,31 @@ def aggregate_cohort_by_dim_choice(df, dim_choice):
     return g
 
 
+def prepare_absolute_summary_df(df):
+    """
+    全量汇总 SQL 已按 Date+OS 合并消耗与行为，此处只补全层级展示列与筛选用 Dimension Value（不再做 groupby）。
+    """
+    if df is None or df.empty:
+        return df
+    g = df.copy()
+    col_plan, col_grp, col_cre = "维度名称_广告计划", "维度名称_广告组", "维度名称_广告创意"
+    if "Media Source" not in g.columns:
+        g["Media Source"] = ""
+    for c in (col_plan, col_grp, col_cre, "维度名称_全部"):
+        if c not in g.columns:
+            g[c] = ""
+    g["Media Source"] = g["Media Source"].fillna("").astype(str)
+    g["维度名称_全部"] = _LABEL_COHORT_ALL
+    g[col_plan] = ""
+    g[col_grp] = ""
+    g[col_cre] = ""
+    g["Dimension Value"] = _LABEL_COHORT_ALL
+    for c in ("group_num_0", "group_num"):
+        if c in g.columns:
+            g.drop(columns=[c], inplace=True, errors="ignore")
+    return g
+
+
 # --- AI 解读：从 txt 读取 prompt / 配置，按 OS 与维度汇总后调 SiliconFlow ---
 def _load_prompt_txt():
     path = os.path.join(os.path.dirname(__file__), "ai_interpret_prompt.txt")
@@ -318,8 +343,11 @@ if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
     end_s = d_range[1].strftime('%Y-%m-%d') if len(d_range) > 1 else start_s
     client = TAClient("https://ta-open.jackpotlandslots.com", token)
     with st.spinner(f"正在分析 {start_s} 至 {end_s} 的新增批次数据..."):
-        # 全量/广告共用同一细粒度 SQL；归集维度仅在应用层聚合与展示层级
-        sql = AdAnalysis.get_cohort_fine_grain_sql(project_id, start_s, end_s)
+        # 全量：消耗按 app_id OS 与 cohort 行为分轨再合并；广告：细粒度计划×组×创意（与用户 cohort 对齐）
+        if dim_choice == "全量汇总":
+            sql = AdAnalysis.get_absolute_summary_sql(project_id, start_s, end_s)
+        else:
+            sql = AdAnalysis.get_cohort_fine_grain_sql(project_id, start_s, end_s)
         raw_text, error = client.execute_query(sql)
         if error:
             st.error(f"❌ SQL 执行错误: {error}")
@@ -328,7 +356,10 @@ if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
     if df_raw_detail.empty:
         st.info("📭 该范围内暂无新增用户数据")
         st.stop()
-    df_agg = aggregate_cohort_by_dim_choice(df_raw_detail, dim_choice)
+    if dim_choice == "全量汇总":
+        df_agg = prepare_absolute_summary_df(df_raw_detail)
+    else:
+        df_agg = aggregate_cohort_by_dim_choice(df_raw_detail, dim_choice)
     df_analysed = DataAnalyser.perform_business_analysis(df_agg)
     # 覆盖当前查询结果：原始明细为细粒度；分析表为当前归集维度
     st.session_state["cohort_df_raw"] = df_raw_detail
@@ -437,6 +468,11 @@ if "cohort_df_analysed" in st.session_state:
     st.caption(
         f"当前归集维度：**{dim_choice}** — 展示「（全部）」及本层以上层级；更细层级留空。"
     )
+    if dim_choice == "全量汇总":
+        st.caption(
+            "全量汇总：消耗按 **appsflyer app_id** 拆 OS，与 cohort 行为（#os）**分轨 UNION 后按 Date+OS 汇总**，"
+            "仅有消耗、无激活用户的部分仍会落在 iOS/Android/Unknown，不会出现因拼用户键导致的 OS 空。"
+        )
     view_cols_wanted = [
         'Date', 'OS', 'Media Source',
         '维度名称_全部', '维度名称_广告计划', '维度名称_广告组', '维度名称_广告创意',

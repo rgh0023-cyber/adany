@@ -4,9 +4,9 @@ import datetime
 class AdAnalysis:
     """
     Cohort SQL：
-    - get_cohort_fine_grain_sql：固定按 广告计划 × 广告组 × 广告创意 × media × 日期 细粒度出数，
-      并输出「维度名称_广告计划/广告组/广告创意」列；「维度名称_全部」在库内为 NULL，由应用层按归集维度填充。
-    - get_absolute_summary_sql / get_advertising_report_sql：均返回上述同一 SQL（广告 report 的 dimension 参数保留兼容，不再影响 SQL）。
+    - get_absolute_summary_sql（全量）：消耗按 appsflyer **app_id** 拆 OS，与 cohort 行为（#os）分轨 UNION 后按 Date+OS 汇总，
+      避免「仅有消耗、无用户」的消耗与用户层级硬拼导致 OS 空/错位。
+    - get_cohort_fine_grain_sql / get_advertising_report_sql：广告穿透，消耗与行为均按 计划×组×创意×media×日 与用户 cohort 对齐。
     """
 
     @staticmethod
@@ -178,8 +178,122 @@ SELECT * FROM (
 
     @staticmethod
     def get_absolute_summary_sql(project_id, start_date, end_date):
-        """全量汇总：与细粒度 SQL 相同，由应用层按「全量汇总」归集为顶层行。"""
-        return AdAnalysis.get_cohort_fine_grain_sql(project_id, start_date, end_date)
+        """
+        全量汇总：消耗与用户行为分轨聚合后再按 Date+OS 合并（口径与早期版本一致）。
+        结果列顺序与 data_processor.expected_cols 一致（含四维占位列，库内为 NULL）。
+        """
+        today_str = datetime.date.today().strftime("%Y-%m-%d")
+        return f"""
+/* sessionProperties: {{"ignore_downstream_preferences":"true"}} */
+SELECT * FROM (
+    SELECT
+        format_datetime("$__Date_Time", 'yyyy-MM-dd') AS "Date",
+        arbitrary('Total') AS "Dimension Value",
+        arbitrary(CAST(NULL AS VARCHAR)) AS "Media Source",
+        "$__OS" AS "OS",
+        arbitrary(CAST(NULL AS VARCHAR)) AS "维度名称_全部",
+        arbitrary(CAST(NULL AS VARCHAR)) AS "维度名称_广告计划",
+        arbitrary(CAST(NULL AS VARCHAR)) AS "维度名称_广告组",
+        arbitrary(CAST(NULL AS VARCHAR)) AS "维度名称_广告创意",
+        SUM(c0) AS "Cost", SUM(c1) AS "Plot UV",
+        SUM(c16) AS "ECPM_Null", SUM(c17) AS "ECPM_0_100", SUM(c18) AS "ECPM_100_200",
+        SUM(c19) AS "ECPM_200_300", SUM(c20) AS "ECPM_300_400", SUM(c21) AS "ECPM_400_500", SUM(c22) AS "ECPM_500+",
+        SUM(c2) AS "L10 UV", SUM(c3) AS "L20 UV", SUM(c8) AS "L30 UV", SUM(c9) AS "L40 UV",
+        SUM(c10) AS "L50 UV", SUM(c11) AS "L60 UV", SUM(c12) AS "L70 UV", SUM(c13) AS "L80 UV",
+        SUM(c14) AS "L90 UV", SUM(c15) AS "L100 UV",
+        SUM(c6) AS "IAP UV", SUM(c24) AS "IAP_UV_D0", SUM(c23) AS "IAP Times", SUM(c7)/100*0.7 AS "IAP Revenue",
+        SUM(c4) AS "Ad UV", SUM(c5) AS "Ad Revenue",
+        SUM(c0) AS total_amount, 1 AS group_num_0, 1 AS group_num
+    FROM (
+        SELECT
+            ta_date_trunc('day', "#event_time", 1) AS "$__Date_Time",
+            CASE WHEN te_ads_object.app_id = 'id6748138347' THEN 'iOS'
+                 WHEN te_ads_object.app_id = 'com.solitairemanor.secrets' THEN 'Android'
+                 ELSE 'Unknown' END AS "$__OS",
+            SUM(CAST(cost AS DOUBLE)) AS c0,
+            0 AS c1, 0 AS c2, 0 AS c3, 0 AS c4, 0 AS c5, 0 AS c6, 0 AS c7, 0 AS c8, 0 AS c9,
+            0 AS c10, 0 AS c11, 0 AS c12, 0 AS c13, 0 AS c14, 0 AS c15, 0 AS c16, 0 AS c17,
+            0 AS c18, 0 AS c19, 0 AS c20, 0 AS c21, 0 AS c22, 0 AS c23, 0 AS c24
+        FROM v_event_{project_id}
+        WHERE "$part_event" = 'appsflyer_master_data'
+          AND "$part_date" >= '2026-01-01'
+          AND ta_date_trunc('day', "#event_time", 1) >= TIMESTAMP '{start_date}'
+          AND ta_date_trunc('day', "#event_time", 1) < date_add('day', 1, TIMESTAMP '{end_date}')
+        GROUP BY 1, 2
+        UNION ALL
+        SELECT
+            ta_date_trunc('day', ta_u.inst_t, 1) AS "$__Date_Time",
+            ta_u.os_display AS "$__OS",
+            0 AS c0,
+            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'first_enter_plot', ta_ev."#user_id"))) AS DOUBLE) AS c1,
+            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '10', ta_ev."#user_id"))) AS DOUBLE) AS c2,
+            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '20', ta_ev."#user_id"))) AS DOUBLE) AS c3,
+            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'applovin_ad_revenue_impression_level' AND ta_ev.ad_format IN ('REWARDED','INTER'), ta_ev."#user_id"))) AS DOUBLE) AS c4,
+            CAST(SUM(CAST(IF(ta_ev."$part_event" = 'applovin_ad_revenue_impression_level' AND ta_ev.ad_format IN ('REWARDED','INTER'), ta_ev.revenue) AS DOUBLE)) AS DOUBLE) AS c5,
+            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'iap_recharge_succeed', ta_ev."#user_id"))) AS DOUBLE) AS c6,
+            CAST(SUM(CAST(IF(ta_ev."$part_event" = 'iap_recharge_succeed', ta_ev.iap_product_currency) AS DOUBLE)) AS DOUBLE) AS c7,
+            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '30', ta_ev."#user_id"))) AS DOUBLE) AS c8,
+            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '40', ta_ev."#user_id"))) AS DOUBLE) AS c9,
+            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '50', ta_ev."#user_id"))) AS DOUBLE) AS c10,
+            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '60', ta_ev."#user_id"))) AS DOUBLE) AS c11,
+            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '70', ta_ev."#user_id"))) AS DOUBLE) AS c12,
+            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '80', ta_ev."#user_id"))) AS DOUBLE) AS c13,
+            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '90', ta_ev."#user_id"))) AS DOUBLE) AS c14,
+            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '100', ta_ev."#user_id"))) AS DOUBLE) AS c15,
+            CAST(COUNT(DISTINCT (IF(ta_u.ecpm IS NULL, ta_ev."#user_id"))) AS DOUBLE) AS c16,
+            CAST(COUNT(DISTINCT (IF(ta_u.ecpm >= 0 AND ta_u.ecpm < 100, ta_ev."#user_id"))) AS DOUBLE) AS c17,
+            CAST(COUNT(DISTINCT (IF(ta_u.ecpm >= 100 AND ta_u.ecpm < 200, ta_ev."#user_id"))) AS DOUBLE) AS c18,
+            CAST(COUNT(DISTINCT (IF(ta_u.ecpm >= 200 AND ta_u.ecpm < 300, ta_ev."#user_id"))) AS DOUBLE) AS c19,
+            CAST(COUNT(DISTINCT (IF(ta_u.ecpm >= 300 AND ta_u.ecpm < 400, ta_ev."#user_id"))) AS DOUBLE) AS c20,
+            CAST(COUNT(DISTINCT (IF(ta_u.ecpm >= 400 AND ta_u.ecpm < 500, ta_ev."#user_id"))) AS DOUBLE) AS c21,
+            CAST(COUNT(DISTINCT (IF(ta_u.ecpm >= 500, ta_ev."#user_id"))) AS DOUBLE) AS c22,
+            CAST(COUNT(IF(ta_ev."$part_event" = 'iap_recharge_succeed', 1)) AS DOUBLE) AS c23,
+            CAST(COUNT(DISTINCT (IF(ta_u.first_iap_t IS NOT NULL AND ta_date_trunc('day', ta_u.first_iap_t, 1) = ta_date_trunc('day', ta_u.inst_t, 1), ta_ev."#user_id"))) AS DOUBLE) AS c24
+        FROM (
+            SELECT "#user_id", "$part_event", "level_id", "ad_format", "revenue", "iap_product_currency", "#app_version"
+            FROM v_event_{project_id}
+            WHERE "$part_event" IN ('first_enter_plot', 'level_start', 'applovin_ad_revenue_impression_level', 'iap_recharge_succeed')
+              AND "$part_date" >= '2026-01-01'
+              AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce("#zone_offset", 0) AS INTEGER), "#event_time"), 1) >= TIMESTAMP '{start_date}'
+              AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce("#zone_offset", 0) AS INTEGER), "#event_time"), 1) < date_add('day', 1, TIMESTAMP '{today_str}')
+        ) ta_ev
+        INNER JOIN (
+            SELECT cohort."#user_id", cohort.v_first, cohort.inst_t, cohort.ecpm, cohort.os_display, fi.first_iap_t
+            FROM (
+                SELECT ev."#user_id", u."app_version_first" AS v_first,
+                       min(date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time")) AS inst_t,
+                       arbitrary(u.first_rv_ecpm) AS ecpm,
+                       CASE WHEN lower(COALESCE(CAST(arbitrary(ev."#os") AS VARCHAR), '')) IN ('ios', 'apple') THEN 'iOS'
+                            WHEN lower(COALESCE(CAST(arbitrary(ev."#os") AS VARCHAR), '')) IN ('android') THEN 'Android'
+                            ELSE 'Unknown' END AS os_display
+                FROM v_event_{project_id} ev
+                LEFT JOIN v_user_{project_id} u ON ev."#user_id" = u."#user_id"
+                WHERE ev."$part_event" = 'first_enter_plot'
+                  AND ev."$part_date" >= '2026-01-01'
+                  AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time"), 1) >= TIMESTAMP '{start_date}'
+                  AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time"), 1) < date_add('day', 1, TIMESTAMP '{end_date}')
+                  AND u."is_test" = false
+                GROUP BY 1, 2
+            ) cohort
+            LEFT JOIN (
+                SELECT i."#user_id", u2."app_version_first" AS v_first,
+                       min(date_add('hour', -8 - CAST(coalesce(i."#zone_offset", 0) AS INTEGER), i."#event_time")) AS first_iap_t
+                FROM v_event_{project_id} i
+                LEFT JOIN v_user_{project_id} u2 ON i."#user_id" = u2."#user_id"
+                WHERE i."$part_event" = 'iap_recharge_succeed'
+                  AND i."$part_date" >= '2026-01-01'
+                  AND i."#app_version" = u2."app_version_first"
+                GROUP BY 1, 2
+            ) fi ON cohort."#user_id" = fi."#user_id" AND cohort.v_first = fi.v_first
+        ) ta_u ON ta_ev."#user_id" = ta_u."#user_id"
+        WHERE ta_ev."#app_version" = ta_u.v_first
+        GROUP BY 1, 2
+    )
+    WHERE "$__Date_Time" >= TIMESTAMP '{start_date}' AND "$__Date_Time" < date_add('day', 1, TIMESTAMP '{end_date}')
+    GROUP BY format_datetime("$__Date_Time", 'yyyy-MM-dd'), "$__OS"
+)
+ORDER BY "Date" DESC, "OS" ASC
+"""
 
     @staticmethod
     def get_advertising_report_sql(project_id, start_date, end_date, dimension="campaign_name"):
