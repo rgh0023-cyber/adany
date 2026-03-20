@@ -12,7 +12,9 @@ class AdAnalysis:
     @staticmethod
     def get_cohort_fine_grain_sql(project_id, start_date, end_date):
         """
-        细粒度 Cohort + 消耗 UNION：GROUP BY campaign_name, ad_group_name, ad_name, media_source, 日。
+        广告穿透专用：cohort 用户按 first_enter_plot 锁定，归因字段来自 v_user.te_ads_object（计划/组/创意）；
+        缺归因记「自然量」。消耗与行为在同一五维键上 UNION。
+        侧边栏「广告计划/组/创意」均调用本 SQL，不改变语句；展示粒度由 app 层 aggregate_cohort_by_dim_choice 处理。
         结果列顺序需与 data_processor.expected_cols 一致。
         """
         today_str = datetime.date.today().strftime("%Y-%m-%d")
@@ -173,7 +175,7 @@ SELECT * FROM (
         )
         WHERE (internal_amount_0 > 0 OR internal_amount_1 > 0)
     )
-) ORDER BY "Date" DESC, total_amount DESC LIMIT 1000
+) ORDER BY "Date" DESC, total_amount DESC LIMIT 10000
 """
 
     @staticmethod
