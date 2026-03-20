@@ -10,7 +10,14 @@ from data_processor import clean_sql_response
 from analysis_lib import AdAnalysis
 from data_analyser import DataAnalyser
 
-# Cohort 细粒度 SQL 返回后，按侧边栏「归集维度」做 sum 聚合（UV/金额类指标可累加至上一层级）
+# ---------------------------------------------------------------------------
+# 架构约定（与业务对齐）
+# 1）「全量汇总」与「广告计划/广告组/广告创意」是两套独立 SQL，互不混用。
+# 2）广告三种共用同一条 cohort 细粒度 SQL：用户按 te_ads_object 归因到计划/组/创意（通常三层有值），
+#    无法归因的为「自然量」；侧边栏三种选项只改变下方「应用层合并粒度」，不改变 SQL 文本与 API 返回的原始明细。
+# 3）维度穿透视图与原始数据明细 + 筛选 UI 共用；全量下 raw 为 Date×OS 粒度，广告下 raw 为创意级细粒度。
+# ---------------------------------------------------------------------------
+# 广告 SQL 原始结果 → 仅按展示粒度做 sum（指标可累加至上一层级）
 COHORT_SUM_COLS = [
     "Cost", "Plot UV", "ECPM_Null", "ECPM_0_100", "ECPM_100_200", "ECPM_200_300", "ECPM_300_400", "ECPM_400_500", "ECPM_500+",
     "L10 UV", "L20 UV", "L30 UV", "L40 UV", "L50 UV", "L60 UV", "L70 UV", "L80 UV", "L90 UV", "L100 UV",
@@ -22,8 +29,9 @@ _LABEL_COHORT_ALL = "（全部）"
 
 def aggregate_cohort_by_dim_choice(df, dim_choice):
     """
-    四级：全部 → 广告计划 → 广告组 → 广告创意。
-    归集在上一层时，下方层级在结果中置空；本层及以上层级有值（全部为固定标签）。
+    仅用于「广告计划 / 广告组 / 广告创意」：对 get_cohort_fine_grain_sql 的同一份结果做展示粒度合并。
+    不改变 SQL；cohort 归因逻辑（含自然量）均在 SQL 内完成。
+    归集在较粗一层时，更细层级列在展示上留空；本层及以上填「（全部）」+ 对应键值。
     """
     if df is None or df.empty:
         return df
@@ -35,26 +43,18 @@ def aggregate_cohort_by_dim_choice(df, dim_choice):
     for c in (col_plan, col_grp, col_cre, "维度名称_全部"):
         if c not in d.columns:
             d[c] = ""
-    level_map = {"全量汇总": 0, "广告计划": 1, "广告组": 2, "广告创意": 3}
-    level = level_map.get(dim_choice, 0)
+    # 全量汇总不得走本函数（由 prepare_absolute_summary_df 处理）
+    ad_level = {"广告计划": 1, "广告组": 2, "广告创意": 3}
+    if dim_choice not in ad_level:
+        return d
+    level = ad_level[dim_choice]
     if not sum_cols:
         return d
 
     def _norm_key(series):
         return series.fillna("").astype(str)
 
-    if level == 0:
-        d = d.copy()
-        d["Date"] = _norm_key(d["Date"])
-        d["OS"] = _norm_key(d["OS"])
-        g = d.groupby(["Date", "OS"], as_index=False)[sum_cols].sum()
-        g["Media Source"] = ""
-        g["维度名称_全部"] = _LABEL_COHORT_ALL
-        g[col_plan] = ""
-        g[col_grp] = ""
-        g[col_cre] = ""
-        g["Dimension Value"] = _LABEL_COHORT_ALL
-    elif level == 1:
+    if level == 1:
         keys = ["Date", "OS", "Media Source", col_plan]
         d = d.copy()
         d["Date"] = _norm_key(d["Date"])
@@ -78,7 +78,7 @@ def aggregate_cohort_by_dim_choice(df, dim_choice):
         g["维度名称_全部"] = _LABEL_COHORT_ALL
         g[col_cre] = ""
         g["Dimension Value"] = g[col_grp].astype(str)
-    else:
+    else:  # level == 3 广告创意：不合并行，仅补层级展示列
         g = d.copy()
         g["维度名称_全部"] = _LABEL_COHORT_ALL
         g["Dimension Value"] = g[col_cre].astype(str) if col_cre in g.columns else ""
@@ -317,11 +317,16 @@ with st.sidebar:
     st.markdown("---")
     st.header("🔍 查询维度")
     dim_choice = st.radio(
-        "选择统计维度", 
+        "选择统计维度",
         ["全量汇总", "广告计划", "广告组", "广告创意"],
-        index=0
+        index=0,
+        help="全量汇总 ≠ 广告三种：两套独立 SQL。广告三种共用同一条 cohort 细粒度 SQL，"
+        "仅下方面板按所选层级合并展示；未归因用户为自然量（SQL 内已处理）。",
     )
-    
+    st.caption(
+        "**全量**与**广告**两套查询逻辑；**广告计划/组/创意**共用一条 SQL，只改变表格合并粒度，不改变接口返回的原始明细结构。"
+    )
+
     st.markdown("---")
     st.header("📅 Cohort 周期")
     # 默认选择最近 7 天
@@ -361,7 +366,7 @@ if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
     else:
         df_agg = aggregate_cohort_by_dim_choice(df_raw_detail, dim_choice)
     df_analysed = DataAnalyser.perform_business_analysis(df_agg)
-    # 覆盖当前查询结果：原始明细为细粒度；分析表为当前归集维度
+    # 覆盖当前查询结果：全量 raw=Date×OS；广告 raw=创意级细粒度（三种选项 SQL 相同）
     st.session_state["cohort_df_raw"] = df_raw_detail
     st.session_state["cohort_df_analysed"] = df_analysed
     st.session_state["cohort_start_s"] = start_s
@@ -472,6 +477,11 @@ if "cohort_df_analysed" in st.session_state:
         st.caption(
             "全量汇总：消耗按 **appsflyer app_id** 拆 OS，与 cohort 行为（#os）**分轨 UNION 后按 Date+OS 汇总**，"
             "仅有消耗、无激活用户的部分仍会落在 iOS/Android/Unknown，不会出现因拼用户键导致的 OS 空。"
+        )
+    else:
+        st.caption(
+            "广告层级：**cohort 用户**按 `te_ads_object` 归因到计划/组/创意（通常三层有值），无归因记为**自然量**；"
+            "当前选项仅决定**应用层合并粒度**，与本次查询返回的**原始明细（创意级）**一致。"
         )
     view_cols_wanted = [
         'Date', 'OS', 'Media Source',
