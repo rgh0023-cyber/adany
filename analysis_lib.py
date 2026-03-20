@@ -22,35 +22,35 @@ class AdAnalysis:
         U = 'u."te_ads_object"'
         # 归因桶约定：
         # 1) 仅当 campaign/ad_group/ad_name 为 NULL 才算「自然量」
-        # 2) 若字段存在但为空字符串或 '-'，标记为「待核查」，用于定位归因缺失/脏数据
+        # 2) 若字段存在但为空字符串或 '-'，同样归为「自然量」
         camp_e = (
             f"CASE WHEN {E} IS NULL OR {E}.\"campaign_name\" IS NULL THEN '自然量' "
-            f"WHEN lower(trim(coalesce(cast({E}.\"campaign_name\" AS VARCHAR), ''))) IN ('-', '') THEN '待核查' "
+            f"WHEN lower(trim(coalesce(cast({E}.\"campaign_name\" AS VARCHAR), ''))) IN ('-', '') THEN '自然量' "
             f"ELSE {E}.\"campaign_name\" END"
         )
         grp_e = (
             f"CASE WHEN {E} IS NULL OR {E}.\"ad_group_name\" IS NULL THEN '自然量' "
-            f"WHEN lower(trim(coalesce(cast({E}.\"ad_group_name\" AS VARCHAR), ''))) IN ('-', '') THEN '待核查' "
+            f"WHEN lower(trim(coalesce(cast({E}.\"ad_group_name\" AS VARCHAR), ''))) IN ('-', '') THEN '自然量' "
             f"ELSE {E}.\"ad_group_name\" END"
         )
         cre_e = (
             f"CASE WHEN {E} IS NULL OR {E}.\"ad_name\" IS NULL THEN '自然量' "
-            f"WHEN lower(trim(coalesce(cast({E}.\"ad_name\" AS VARCHAR), ''))) IN ('-', '') THEN '待核查' "
+            f"WHEN lower(trim(coalesce(cast({E}.\"ad_name\" AS VARCHAR), ''))) IN ('-', '') THEN '自然量' "
             f"ELSE {E}.\"ad_name\" END"
         )
         camp_u = (
             f"CASE WHEN {U} IS NULL OR {U}.\"campaign_name\" IS NULL THEN '自然量' "
-            f"WHEN lower(trim(coalesce(cast({U}.\"campaign_name\" AS VARCHAR), ''))) IN ('-', '') THEN '待核查' "
+            f"WHEN lower(trim(coalesce(cast({U}.\"campaign_name\" AS VARCHAR), ''))) IN ('-', '') THEN '自然量' "
             f"ELSE {U}.\"campaign_name\" END"
         )
         grp_u = (
             f"CASE WHEN {U} IS NULL OR {U}.\"ad_group_name\" IS NULL THEN '自然量' "
-            f"WHEN lower(trim(coalesce(cast({U}.\"ad_group_name\" AS VARCHAR), ''))) IN ('-', '') THEN '待核查' "
+            f"WHEN lower(trim(coalesce(cast({U}.\"ad_group_name\" AS VARCHAR), ''))) IN ('-', '') THEN '自然量' "
             f"ELSE {U}.\"ad_group_name\" END"
         )
         cre_u = (
             f"CASE WHEN {U} IS NULL OR {U}.\"ad_name\" IS NULL THEN '自然量' "
-            f"WHEN lower(trim(coalesce(cast({U}.\"ad_name\" AS VARCHAR), ''))) IN ('-', '') THEN '待核查' "
+            f"WHEN lower(trim(coalesce(cast({U}.\"ad_name\" AS VARCHAR), ''))) IN ('-', '') THEN '自然量' "
             f"ELSE {U}.\"ad_name\" END"
         )
         media_e = f"CASE WHEN {E} IS NULL OR {E}.\"media_source\" IS NULL THEN 'Organic' ELSE {E}.\"media_source\" END"
