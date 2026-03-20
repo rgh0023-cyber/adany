@@ -520,7 +520,8 @@ if "cohort_df_analysed" in st.session_state:
         selected_plan = st.multiselect("筛选 广告计划", options=options_plan, default=[], key="filter_plan")
         if selected_plan:
             df_view = df_view[df_view['维度名称_广告计划'].astype(str).isin(selected_plan)]
-    if dim_choice == "广告创意" and '维度名称_广告组' in df_view.columns:
+    if dim_choice in ("广告组", "广告创意") and '维度名称_广告组' in df_view.columns:
+        # 下层选项基于上层筛选后的 df_view 生成，实现级联控制
         options_group = sorted(df_view['维度名称_广告组'].dropna().astype(str).unique().tolist())
         selected_group = st.multiselect("筛选 广告组", options=options_group, default=[], key="filter_group")
         if selected_group:
@@ -575,7 +576,8 @@ if "cohort_df_analysed" in st.session_state:
             raw_selected_plan = st.multiselect("筛选 广告计划（原始表）", options=raw_options_plan, default=[], key="filter_raw_plan")
             if raw_selected_plan:
                 df_raw_display = df_raw_display[df_raw_display["维度名称_广告计划"].astype(str).isin(raw_selected_plan)]
-        if dim_choice == "广告创意" and "维度名称_广告组" in df_raw_display.columns:
+        if dim_choice in ("广告组", "广告创意") and "维度名称_广告组" in df_raw_display.columns:
+            # 原始表同样按上层筛选后的数据生成下层组选项
             raw_options_group = sorted(df_raw_display["维度名称_广告组"].dropna().astype(str).unique().tolist())
             raw_selected_group = st.multiselect("筛选 广告组（原始表）", options=raw_options_group, default=[], key="filter_raw_group")
             if raw_selected_group:
