@@ -96,19 +96,19 @@ SELECT * FROM (
             ) as total_amount
         FROM (
             SELECT dim_campaign, dim_ad_group, dim_ad_name, media_source, os_val, "$__Date_Time",
-                arbitrary(internal_amount_0) internal_amount_0, arbitrary(internal_amount_1) internal_amount_1,
-                arbitrary(internal_amount_2) internal_amount_2, arbitrary(internal_amount_3) internal_amount_3,
-                arbitrary(internal_amount_4) internal_amount_4, arbitrary(internal_amount_5) internal_amount_5,
-                arbitrary(internal_amount_6) internal_amount_6, arbitrary(internal_amount_7) internal_amount_7,
-                arbitrary(internal_amount_8) internal_amount_8, arbitrary(internal_amount_9) internal_amount_9,
-                arbitrary(internal_amount_10) internal_amount_10, arbitrary(internal_amount_11) internal_amount_11,
-                arbitrary(internal_amount_12) internal_amount_12, arbitrary(internal_amount_13) internal_amount_13,
-                arbitrary(internal_amount_14) internal_amount_14, arbitrary(internal_amount_15) internal_amount_15,
-                arbitrary(internal_amount_16) internal_amount_16, arbitrary(internal_amount_17) internal_amount_17,
-                arbitrary(internal_amount_18) internal_amount_18, arbitrary(internal_amount_19) internal_amount_19,
-                arbitrary(internal_amount_20) internal_amount_20, arbitrary(internal_amount_21) internal_amount_21,
-                arbitrary(internal_amount_22) internal_amount_22, arbitrary(internal_amount_23) internal_amount_23,
-                arbitrary(internal_amount_24) internal_amount_24
+                SUM(coalesce(internal_amount_0, 0)) internal_amount_0, SUM(coalesce(internal_amount_1, 0)) internal_amount_1,
+                SUM(coalesce(internal_amount_2, 0)) internal_amount_2, SUM(coalesce(internal_amount_3, 0)) internal_amount_3,
+                SUM(coalesce(internal_amount_4, 0)) internal_amount_4, SUM(coalesce(internal_amount_5, 0)) internal_amount_5,
+                SUM(coalesce(internal_amount_6, 0)) internal_amount_6, SUM(coalesce(internal_amount_7, 0)) internal_amount_7,
+                SUM(coalesce(internal_amount_8, 0)) internal_amount_8, SUM(coalesce(internal_amount_9, 0)) internal_amount_9,
+                SUM(coalesce(internal_amount_10, 0)) internal_amount_10, SUM(coalesce(internal_amount_11, 0)) internal_amount_11,
+                SUM(coalesce(internal_amount_12, 0)) internal_amount_12, SUM(coalesce(internal_amount_13, 0)) internal_amount_13,
+                SUM(coalesce(internal_amount_14, 0)) internal_amount_14, SUM(coalesce(internal_amount_15, 0)) internal_amount_15,
+                SUM(coalesce(internal_amount_16, 0)) internal_amount_16, SUM(coalesce(internal_amount_17, 0)) internal_amount_17,
+                SUM(coalesce(internal_amount_18, 0)) internal_amount_18, SUM(coalesce(internal_amount_19, 0)) internal_amount_19,
+                SUM(coalesce(internal_amount_20, 0)) internal_amount_20, SUM(coalesce(internal_amount_21, 0)) internal_amount_21,
+                SUM(coalesce(internal_amount_22, 0)) internal_amount_22, SUM(coalesce(internal_amount_23, 0)) internal_amount_23,
+                SUM(coalesce(internal_amount_24, 0)) internal_amount_24
             FROM (
                 -- 消耗(Event Time)，与行为侧同一五维分组键
                 SELECT
