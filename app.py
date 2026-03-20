@@ -396,9 +396,23 @@ if "cohort_df_analysed" in st.session_state:
 
     st.markdown("---")
     with st.expander("🔍 原始数据明细 (对账专用)", expanded=False):
+        st.caption("以下筛选 **独立于** 上方「维度穿透视图」；未选时表示不过滤。数据来自本次查询缓存，不会重新请求 API。")
         st.write("此处展示 SQL 返回的原始字段（含 ECPM 分布及 L 等级 UV）")
-        st.dataframe(df_raw, use_container_width=True)
-        csv = df_raw.to_csv(index=False).encode('utf-8')
+        df_src = df_raw.copy()
+        raw_selected_os, raw_selected_dim = [], []
+        if "OS" in df_src.columns:
+            raw_options_os = sorted(df_src["OS"].dropna().astype(str).unique().tolist())
+            raw_selected_os = st.multiselect("筛选 OS（原始表）", options=raw_options_os, default=[], key="filter_raw_os")
+        if "Dimension Value" in df_src.columns:
+            raw_options_dim = sorted(df_src["Dimension Value"].dropna().astype(str).unique().tolist())
+            raw_selected_dim = st.multiselect("筛选 维度名称（原始表）", options=raw_options_dim, default=[], key="filter_raw_dim")
+        df_raw_display = df_src.copy()
+        if raw_selected_os and "OS" in df_raw_display.columns:
+            df_raw_display = df_raw_display[df_raw_display["OS"].astype(str).isin(raw_selected_os)]
+        if raw_selected_dim and "Dimension Value" in df_raw_display.columns:
+            df_raw_display = df_raw_display[df_raw_display["Dimension Value"].astype(str).isin(raw_selected_dim)]
+        st.dataframe(df_raw_display, use_container_width=True)
+        csv = df_raw_display.to_csv(index=False).encode("utf-8")
         st.download_button(
             label="📥 下载原始报表 (.csv)",
             data=csv,
