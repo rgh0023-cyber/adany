@@ -10,6 +10,85 @@ from data_processor import clean_sql_response
 from analysis_lib import AdAnalysis
 from data_analyser import DataAnalyser
 
+# Cohort 细粒度 SQL 返回后，按侧边栏「归集维度」做 sum 聚合（UV/金额类指标可累加至上一层级）
+COHORT_SUM_COLS = [
+    "Cost", "Plot UV", "ECPM_Null", "ECPM_0_100", "ECPM_100_200", "ECPM_200_300", "ECPM_300_400", "ECPM_400_500", "ECPM_500+",
+    "L10 UV", "L20 UV", "L30 UV", "L40 UV", "L50 UV", "L60 UV", "L70 UV", "L80 UV", "L90 UV", "L100 UV",
+    "IAP UV", "IAP_UV_D0", "IAP Times", "IAP Revenue", "Ad UV", "Ad Revenue", "total_amount",
+]
+
+_LABEL_COHORT_ALL = "（全部）"
+
+
+def aggregate_cohort_by_dim_choice(df, dim_choice):
+    """
+    四级：全部 → 广告计划 → 广告组 → 广告创意。
+    归集在上一层时，下方层级在结果中置空；本层及以上层级有值（全部为固定标签）。
+    """
+    if df is None or df.empty:
+        return df
+    d = df.copy()
+    sum_cols = [c for c in COHORT_SUM_COLS if c in d.columns]
+    for c in sum_cols:
+        d[c] = pd.to_numeric(d[c], errors="coerce").fillna(0)
+    col_plan, col_grp, col_cre = "维度名称_广告计划", "维度名称_广告组", "维度名称_广告创意"
+    for c in (col_plan, col_grp, col_cre, "维度名称_全部"):
+        if c not in d.columns:
+            d[c] = ""
+    level_map = {"全量汇总": 0, "广告计划": 1, "广告组": 2, "广告创意": 3}
+    level = level_map.get(dim_choice, 0)
+    if not sum_cols:
+        return d
+
+    def _norm_key(series):
+        return series.fillna("").astype(str)
+
+    if level == 0:
+        d = d.copy()
+        d["Date"] = _norm_key(d["Date"])
+        d["OS"] = _norm_key(d["OS"])
+        g = d.groupby(["Date", "OS"], as_index=False)[sum_cols].sum()
+        g["Media Source"] = ""
+        g["维度名称_全部"] = _LABEL_COHORT_ALL
+        g[col_plan] = ""
+        g[col_grp] = ""
+        g[col_cre] = ""
+        g["Dimension Value"] = _LABEL_COHORT_ALL
+    elif level == 1:
+        keys = ["Date", "OS", "Media Source", col_plan]
+        d = d.copy()
+        d["Date"] = _norm_key(d["Date"])
+        d["OS"] = _norm_key(d["OS"])
+        d["Media Source"] = _norm_key(d["Media Source"])
+        d[col_plan] = _norm_key(d[col_plan])
+        g = d.groupby(keys, as_index=False)[sum_cols].sum()
+        g["维度名称_全部"] = _LABEL_COHORT_ALL
+        g[col_grp] = ""
+        g[col_cre] = ""
+        g["Dimension Value"] = g[col_plan].astype(str)
+    elif level == 2:
+        keys = ["Date", "OS", "Media Source", col_plan, col_grp]
+        d = d.copy()
+        d["Date"] = _norm_key(d["Date"])
+        d["OS"] = _norm_key(d["OS"])
+        d["Media Source"] = _norm_key(d["Media Source"])
+        d[col_plan] = _norm_key(d[col_plan])
+        d[col_grp] = _norm_key(d[col_grp])
+        g = d.groupby(keys, as_index=False)[sum_cols].sum()
+        g["维度名称_全部"] = _LABEL_COHORT_ALL
+        g[col_cre] = ""
+        g["Dimension Value"] = g[col_grp].astype(str)
+    else:
+        g = d.copy()
+        g["维度名称_全部"] = _LABEL_COHORT_ALL
+        g["Dimension Value"] = g[col_cre].astype(str) if col_cre in g.columns else ""
+
+    for c in ("group_num_0", "group_num"):
+        if c in g.columns:
+            g.drop(columns=[c], inplace=True, errors="ignore")
+    return g
+
+
 # --- AI 解读：从 txt 读取 prompt / 配置，按 OS 与维度汇总后调 SiliconFlow ---
 def _load_prompt_txt():
     path = os.path.join(os.path.dirname(__file__), "ai_interpret_prompt.txt")
@@ -239,21 +318,20 @@ if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
     end_s = d_range[1].strftime('%Y-%m-%d') if len(d_range) > 1 else start_s
     client = TAClient("https://ta-open.jackpotlandslots.com", token)
     with st.spinner(f"正在分析 {start_s} 至 {end_s} 的新增批次数据..."):
-        if dim_choice == "全量汇总":
-            sql = AdAnalysis.get_absolute_summary_sql(project_id, start_s, end_s)
-        else:
-            sql = AdAnalysis.get_advertising_report_sql(project_id, start_s, end_s, dim_choice)
+        # 全量/广告共用同一细粒度 SQL；归集维度仅在应用层聚合与展示层级
+        sql = AdAnalysis.get_cohort_fine_grain_sql(project_id, start_s, end_s)
         raw_text, error = client.execute_query(sql)
         if error:
             st.error(f"❌ SQL 执行错误: {error}")
             st.stop()
-        df_raw = clean_sql_response(raw_text)
-    if df_raw.empty:
+        df_raw_detail = clean_sql_response(raw_text)
+    if df_raw_detail.empty:
         st.info("📭 该范围内暂无新增用户数据")
         st.stop()
-    df_analysed = DataAnalyser.perform_business_analysis(df_raw)
-    # 覆盖当前查询结果：筛选仅基于这份数据，不会触发重查
-    st.session_state["cohort_df_raw"] = df_raw
+    df_agg = aggregate_cohort_by_dim_choice(df_raw_detail, dim_choice)
+    df_analysed = DataAnalyser.perform_business_analysis(df_agg)
+    # 覆盖当前查询结果：原始明细为细粒度；分析表为当前归集维度
+    st.session_state["cohort_df_raw"] = df_raw_detail
     st.session_state["cohort_df_analysed"] = df_analysed
     st.session_state["cohort_start_s"] = start_s
     st.session_state["cohort_end_s"] = end_s
@@ -356,9 +434,14 @@ if "cohort_df_analysed" in st.session_state:
             st.caption("本轮已达 2 次追问上限，重新执行查询后可再次生成解读并追问。")
 
     st.subheader("维度穿透视图")
+    st.caption(
+        f"当前归集维度：**{dim_choice}** — 展示「（全部）」及本层以上层级；更细层级留空。"
+    )
     view_cols_wanted = [
-        'Date', 'OS', 'Dimension Value', 'Plot UV', 'Cost', 'High_ECPM_Rate', 'Total Revenue', 'IAP Revenue',
-        'ROI', 'CPA_Plot', 'IAP UV', 'IAP_UV_D0', 'CPP_Pay', 'L20_Pass_Rate', 'CPA_L20', 'PUR'
+        'Date', 'OS', 'Media Source',
+        '维度名称_全部', '维度名称_广告计划', '维度名称_广告组', '维度名称_广告创意',
+        'Plot UV', 'Cost', 'High_ECPM_Rate', 'Total Revenue', 'IAP Revenue',
+        'ROI', 'CPA_Plot', 'IAP UV', 'IAP_UV_D0', 'CPP_Pay', 'L20_Pass_Rate', 'CPA_L20', 'PUR',
     ]
     display_cols = [c for c in view_cols_wanted if c in df_analysed.columns]
     df_view = df_analysed.copy()
@@ -374,7 +457,11 @@ if "cohort_df_analysed" in st.session_state:
             df_view = df_view[df_view['Dimension Value'].astype(str).isin(selected_dim)]
     display_cols = [c for c in view_cols_wanted if c in df_view.columns]
     rename_map = {
-        'Dimension Value': '维度名称',
+        'Media Source': '媒体源',
+        '维度名称_全部': '全部',
+        '维度名称_广告计划': '广告计划',
+        '维度名称_广告组': '广告组',
+        '维度名称_广告创意': '广告创意',
         'Plot UV': '激活人数',
         'High_ECPM_Rate': '高质量占比',
         'CPA_Plot': '激活成本',
@@ -386,7 +473,7 @@ if "cohort_df_analysed" in st.session_state:
     }
     display_df = df_view[display_cols].rename(columns={k: v for k, v in rename_map.items() if k in display_cols})
     format_map = {
-        'Cost': '${:,.2f}', '激活人数': '{:,.0f}', '高质量占比': '{:.1%}', 'Total Revenue': '${:,.2f}', 'IAP Revenue': '${:,.2f}', 'ROI': '{:.2%}',
+        'Cost': '${:,.2f}', '激活人数': '{:,.0f}', '高质量占比': '{:.1%}', 'Total Revenue': '${:,.2f}', 'IAP Revenue': '${:,.2f}',         'ROI': '{:.2%}',
         '激活成本': '${:.2f}', 'IAP UV': '{:,.0f}', 'D0首充UV': '{:,.0f}', '付费成本': '${:.2f}',
         '20关通过率': '{:.2%}', '20关成本': '${:.2f}', '付费率': '{:.2%}'
     }

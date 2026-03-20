@@ -24,7 +24,9 @@ def clean_sql_response(raw_text):
     try:
         # 定义物理对齐表头
         expected_cols = [
-            'Date', 'Dimension Value', 'Media Source', 'OS', 'Cost', 'Plot UV', 
+            'Date', 'Dimension Value', 'Media Source', 'OS',
+            '维度名称_全部', '维度名称_广告计划', '维度名称_广告组', '维度名称_广告创意',
+            'Cost', 'Plot UV', 
             'ECPM_Null', 'ECPM_0_100', 'ECPM_100_200', 'ECPM_200_300', 
             'ECPM_300_400', 'ECPM_400_500', 'ECPM_500+',
             'L10 UV', 'L20 UV', 'L30 UV', 'L40 UV', 'L50 UV', 'L60 UV', 'L70 UV', 'L80 UV', 'L90 UV', 'L100 UV',
