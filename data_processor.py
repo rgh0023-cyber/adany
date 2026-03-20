@@ -46,8 +46,13 @@ def clean_sql_response(raw_text):
         if df.shape[0] > 0 and ("Date" in str(df.iloc[0,0]) or "Dimension" in str(df.iloc[0,0])):
             df = df.iloc[1:].reset_index(drop=True)
         
-        # 强制对齐列名
-        df.columns = expected_cols[:df.shape[1]]
+        # 强制对齐列名（容错：若 SQL 返回列比预期多，不直接失败，先扩展占位列再截断）
+        if df.shape[1] <= len(expected_cols):
+            df.columns = expected_cols[:df.shape[1]]
+        else:
+            extra_cols = [f"extra_col_{i}" for i in range(df.shape[1] - len(expected_cols))]
+            df.columns = expected_cols + extra_cols
+            df = df.iloc[:, :len(expected_cols)]
 
         # 清洗特殊字符
         def clean_val(x):
