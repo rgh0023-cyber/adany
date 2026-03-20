@@ -333,6 +333,7 @@ with st.sidebar:
     default_start = datetime.date.today() - datetime.timedelta(days=7)
     default_end = datetime.date.today()
     d_range = st.date_input("选择新增批次范围", [default_start, default_end])
+    debug_sql_mode = st.checkbox("调试模式（显示 SQL 与解析信息）", value=False)
 
     st.markdown("---")
     if st.button("退出登录", use_container_width=True):
@@ -356,8 +357,25 @@ if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
         raw_text, error = client.execute_query(sql)
         if error:
             st.error(f"❌ SQL 执行错误: {error}")
+            if debug_sql_mode:
+                st.code(sql[:4000], language="sql")
             st.stop()
+        if debug_sql_mode:
+            st.markdown("### 调试信息")
+            st.caption("SQL（前 4000 字符）")
+            st.code(sql[:4000], language="sql")
+            raw_preview = (raw_text or "")
+            st.caption(f"raw_text 长度: {len(raw_preview)}")
+            if raw_preview:
+                preview_lines = "\n".join(raw_preview.splitlines()[:8])
+                st.caption("raw_text 前 8 行：")
+                st.code(preview_lines)
         df_raw_detail = clean_sql_response(raw_text)
+        if debug_sql_mode:
+            st.caption(f"clean_sql_response 后 shape: {df_raw_detail.shape}")
+            if not df_raw_detail.empty:
+                st.caption("解析后前 5 行：")
+                st.dataframe(df_raw_detail.head(5), use_container_width=True)
     if df_raw_detail.empty:
         st.info("📭 该范围内暂无新增用户数据")
         st.stop()
