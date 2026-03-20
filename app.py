@@ -357,7 +357,7 @@ if "cohort_df_analysed" in st.session_state:
 
     st.subheader("维度穿透视图")
     view_cols_wanted = [
-        'Date', 'OS', 'Dimension Value', 'Cost', 'High_ECPM_Rate', 'Total Revenue', 'IAP Revenue',
+        'Date', 'OS', 'Dimension Value', 'Plot UV', 'Cost', 'High_ECPM_Rate', 'Total Revenue', 'IAP Revenue',
         'ROI', 'CPA_Plot', 'IAP UV', 'IAP_UV_D0', 'CPP_Pay', 'L20_Pass_Rate', 'CPA_L20', 'PUR'
     ]
     display_cols = [c for c in view_cols_wanted if c in df_analysed.columns]
@@ -375,6 +375,7 @@ if "cohort_df_analysed" in st.session_state:
     display_cols = [c for c in view_cols_wanted if c in df_view.columns]
     rename_map = {
         'Dimension Value': '维度名称',
+        'Plot UV': '激活人数',
         'High_ECPM_Rate': '高质量占比',
         'CPA_Plot': '激活成本',
         'CPP_Pay': '付费成本',
@@ -385,7 +386,7 @@ if "cohort_df_analysed" in st.session_state:
     }
     display_df = df_view[display_cols].rename(columns={k: v for k, v in rename_map.items() if k in display_cols})
     format_map = {
-        'Cost': '${:,.2f}', '高质量占比': '{:.1%}', 'Total Revenue': '${:,.2f}', 'IAP Revenue': '${:,.2f}', 'ROI': '{:.2%}',
+        'Cost': '${:,.2f}', '激活人数': '{:,.0f}', '高质量占比': '{:.1%}', 'Total Revenue': '${:,.2f}', 'IAP Revenue': '${:,.2f}', 'ROI': '{:.2%}',
         '激活成本': '${:.2f}', 'IAP UV': '{:,.0f}', 'D0首充UV': '{:,.0f}', '付费成本': '${:.2f}',
         '20关通过率': '{:.2%}', '20关成本': '${:.2f}', '付费率': '{:.2%}'
     }
