@@ -114,6 +114,20 @@ def prepare_absolute_summary_df(df):
     return g
 
 
+def sort_for_display(df):
+    """统一展示排序：Date -> OS -> 广告计划 -> 广告组 -> 广告创意，全部倒序。"""
+    if df is None or df.empty:
+        return df
+    d = df.copy()
+    sort_cols = ["Date", "OS", "维度名称_广告计划", "维度名称_广告组", "维度名称_广告创意"]
+    use_cols = [c for c in sort_cols if c in d.columns]
+    if not use_cols:
+        return d
+    for c in use_cols:
+        d[c] = d[c].fillna("").astype(str)
+    return d.sort_values(by=use_cols, ascending=[False] * len(use_cols), kind="mergesort")
+
+
 # --- AI 解读：从 txt 读取 prompt / 配置，按 OS 与维度汇总后调 SiliconFlow ---
 def _load_prompt_txt():
     path = os.path.join(os.path.dirname(__file__), "ai_interpret_prompt.txt")
@@ -531,6 +545,7 @@ if "cohort_df_analysed" in st.session_state:
         selected_dim = st.multiselect("筛选 维度名称", options=options_dim, default=[], key="filter_dim")
         if selected_dim:
             df_view = df_view[df_view['Dimension Value'].astype(str).isin(selected_dim)]
+    df_view = sort_for_display(df_view)
     display_cols = [c for c in view_cols_wanted if c in df_view.columns]
     rename_map = {
         'Media Source': '媒体源',
@@ -587,6 +602,7 @@ if "cohort_df_analysed" in st.session_state:
             raw_selected_dim = st.multiselect("筛选 维度名称（原始表）", options=raw_options_dim, default=[], key="filter_raw_dim")
         if raw_selected_dim and "Dimension Value" in df_raw_display.columns:
             df_raw_display = df_raw_display[df_raw_display["Dimension Value"].astype(str).isin(raw_selected_dim)]
+        df_raw_display = sort_for_display(df_raw_display)
         st.dataframe(df_raw_display, use_container_width=True)
         csv = df_raw_display.to_csv(index=False).encode("utf-8")
         st.download_button(
