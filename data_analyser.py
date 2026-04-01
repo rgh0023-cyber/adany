@@ -22,6 +22,8 @@ class DataAnalyser:
         
         # ROI 计算 (避免除以0)
         df['ROI'] = (df['Total Revenue'] / df['Cost']).replace([np.inf, -np.inf], 0).fillna(0)
+        # IAP ROI：仅使用 IAP Revenue / Cost（与 cohort 口径一致，基于同一批次聚合结果）
+        df['IAP_ROI'] = (df['IAP Revenue'] / df['Cost']).replace([np.inf, -np.inf], 0).fillna(0)
         
         # 总转化成本 (CPA) -> 每一记 Plot UV 的成本
         df['CPA_Plot'] = (df['Cost'] / df['Plot UV']).replace([np.inf, -np.inf], 0).fillna(0)
