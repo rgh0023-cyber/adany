@@ -204,6 +204,9 @@ SELECT * FROM (
                           AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time"), 1) >= TIMESTAMP '{start_date}'
                           AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time"), 1) < date_add('day', 1, TIMESTAMP '{end_date}')
                           AND u."is_test" = false
+                          AND coalesce(CAST(u."#account_id" AS VARCHAR), '') NOT IN (
+                              '86122677072314368', '85632127382601728', '85631822439923712'
+                          )
                         GROUP BY 1, 2, 3, 4, 5, 6
                     ) cohort
                     LEFT JOIN (
@@ -331,6 +334,9 @@ SELECT * FROM (
                   AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time"), 1) >= TIMESTAMP '{start_date}'
                   AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time"), 1) < date_add('day', 1, TIMESTAMP '{end_date}')
                   AND u."is_test" = false
+                  AND coalesce(CAST(u."#account_id" AS VARCHAR), '') NOT IN (
+                      '86122677072314368', '85632127382601728', '85631822439923712'
+                  )
                 GROUP BY 1, 2
             ) cohort
             LEFT JOIN (
