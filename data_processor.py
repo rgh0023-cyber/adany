@@ -1,6 +1,7 @@
 import pandas as pd
 import io
 import re
+import csv
 
 def clean_sql_response(raw_text):
     if not raw_text or len(raw_text.strip()) == 0:
@@ -51,17 +52,35 @@ def clean_sql_response(raw_text):
             lines = [ln for ln in content.splitlines() if ln.count(",") >= 10]
             df = _parse_csv("\n".join(lines))
 
+        # 仍为空时，按「精确列数」逐行提取有效 CSV 记录，避免坏行拖垮整批
+        if df.empty and content:
+            valid_rows = []
+            for ln in content.splitlines():
+                line = (ln or "").strip()
+                if not line:
+                    continue
+                try:
+                    parsed = next(csv.reader([line]))
+                except Exception:
+                    continue
+                if len(parsed) == len(expected_cols):
+                    valid_rows.append(parsed)
+            if valid_rows:
+                df = pd.DataFrame(valid_rows, columns=expected_cols)
+                # 已在此处完成列名对齐，后续对齐逻辑无需再处理
+
         # 过滤第一行是表头字符的情况
         if df.shape[0] > 0 and ("Date" in str(df.iloc[0, 0]) or "Dimension" in str(df.iloc[0, 0])):
             df = df.iloc[1:].reset_index(drop=True)
 
         # 强制对齐列名（容错：若 SQL 返回列比预期多，不直接失败，先扩展占位列再截断）
-        if df.shape[1] <= len(expected_cols):
-            df.columns = expected_cols[:df.shape[1]]
-        else:
-            extra_cols = [f"extra_col_{i}" for i in range(df.shape[1] - len(expected_cols))]
-            df.columns = expected_cols + extra_cols
-            df = df.iloc[:, :len(expected_cols)]
+        if list(df.columns) != expected_cols:
+            if df.shape[1] <= len(expected_cols):
+                df.columns = expected_cols[:df.shape[1]]
+            else:
+                extra_cols = [f"extra_col_{i}" for i in range(df.shape[1] - len(expected_cols))]
+                df.columns = expected_cols + extra_cols
+                df = df.iloc[:, :len(expected_cols)]
 
         # 清洗特殊字符
         def clean_val(x):
