@@ -15,11 +15,8 @@ def clean_sql_response(raw_text):
         except UnicodeDecodeError:
             content = raw_text.decode('gbk', errors='ignore')
     else:
-        # 如果已经是字符串，但看起来像乱码（ISO-8859-1 误认 UTF-8）
-        try:
-            content = raw_text.encode('iso-8859-1').decode('utf-8')
-        except (UnicodeEncodeError, UnicodeDecodeError):
-            content = raw_text
+        # 已经是字符串时直接使用，避免二次转码造成中文乱码
+        content = raw_text
     # --- 强力解码逻辑结束 ---
 
     try:

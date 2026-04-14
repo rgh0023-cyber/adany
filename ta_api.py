@@ -28,10 +28,13 @@ class TAClient:
             )
             
             if response.status_code == 200:
+                # 优先按 UTF-8 读取，避免 requests 自动猜编码导致中文乱码
+                response.encoding = "utf-8"
+                text = response.text
                 # 检查是否为 JSON 报错信息
-                if response.text.strip().startswith('{"code"'):
+                if text.strip().startswith('{"code"'):
                     return None, response.json()
-                return response.text, None
+                return text, None
             else:
                 return None, f"HTTP {response.status_code}: {response.reason}"
         except Exception as e:
