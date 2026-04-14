@@ -33,19 +33,28 @@ def clean_sql_response(raw_text):
             'IAP UV', 'IAP_UV_D0', 'IAP Times', 'IAP Revenue', 'Ad UV', 'Ad Revenue', 'total_amount', 'group_num_0', 'group_num'
         ]
 
-        # 使用 StringIO 读取，显式指定引擎
-        df = pd.read_csv(
-            io.StringIO(content.strip()), 
-            header=None, 
-            quotechar='"', 
-            skipinitialspace=True,
-            engine='python'
-        )
-        
+        def _parse_csv(csv_text):
+            return pd.read_csv(
+                io.StringIO((csv_text or "").strip()),
+                header=None,
+                quotechar='"',
+                skipinitialspace=True,
+                engine='python',
+                on_bad_lines='skip'
+            )
+
+        # 第一轮：直接解析
+        df = _parse_csv(content)
+
+        # 若返回中混入非 CSV 行，做一次兜底清洗后重试
+        if df.empty and content:
+            lines = [ln for ln in content.splitlines() if ln.count(",") >= 10]
+            df = _parse_csv("\n".join(lines))
+
         # 过滤第一行是表头字符的情况
-        if df.shape[0] > 0 and ("Date" in str(df.iloc[0,0]) or "Dimension" in str(df.iloc[0,0])):
+        if df.shape[0] > 0 and ("Date" in str(df.iloc[0, 0]) or "Dimension" in str(df.iloc[0, 0])):
             df = df.iloc[1:].reset_index(drop=True)
-        
+
         # 强制对齐列名（容错：若 SQL 返回列比预期多，不直接失败，先扩展占位列再截断）
         if df.shape[1] <= len(expected_cols):
             df.columns = expected_cols[:df.shape[1]]
