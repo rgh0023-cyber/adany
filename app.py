@@ -4,6 +4,9 @@ import os
 import requests
 import pandas as pd
 import numpy as np
+import io
+import csv
+import re
 # 确保以下自定义模块在同一目录下
 from ta_api import TAClient
 from data_processor import clean_sql_response
@@ -22,6 +25,16 @@ COHORT_SUM_COLS = [
     "Cost", "Plot UV", "ECPM_Null", "ECPM_0_100", "ECPM_100_200", "ECPM_200_300", "ECPM_300_400", "ECPM_400_500", "ECPM_500+",
     "L10 UV", "L20 UV", "L30 UV", "L40 UV", "L50 UV", "L60 UV", "L70 UV", "L80 UV", "L90 UV", "L100 UV",
     "IAP UV", "IAP_UV_D0", "IAP Times", "IAP Revenue", "Ad UV", "Ad Revenue", "total_amount",
+]
+
+EXPECTED_SQL_COLS = [
+    'Date', 'Dimension Value', 'Media Source', 'OS',
+    '维度名称_全部', '维度名称_广告计划', '维度名称_广告组', '维度名称_广告创意',
+    'Cost', 'Plot UV',
+    'ECPM_Null', 'ECPM_0_100', 'ECPM_100_200', 'ECPM_200_300',
+    'ECPM_300_400', 'ECPM_400_500', 'ECPM_500+',
+    'L10 UV', 'L20 UV', 'L30 UV', 'L40 UV', 'L50 UV', 'L60 UV', 'L70 UV', 'L80 UV', 'L90 UV', 'L100 UV',
+    'IAP UV', 'IAP_UV_D0', 'IAP Times', 'IAP Revenue', 'Ad UV', 'Ad Revenue', 'total_amount', 'group_num_0', 'group_num'
 ]
 
 _LABEL_COHORT_ALL = "（全部）"
@@ -386,6 +399,37 @@ if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
                 st.caption("raw_text 前 8 行：")
                 st.code(preview_lines)
         df_raw_detail = clean_sql_response(raw_text)
+        fallback_valid_rows = 0
+        # 兜底：主解析为空时，逐行按 CSV 解析并仅保留 36 列的有效行
+        if df_raw_detail.empty and raw_text:
+            valid_rows = []
+            for ln in (raw_text or "").splitlines():
+                line = (ln or "").strip()
+                if not line:
+                    continue
+                try:
+                    parsed = next(csv.reader([line]))
+                except Exception:
+                    continue
+                if len(parsed) == len(EXPECTED_SQL_COLS):
+                    valid_rows.append(parsed)
+            fallback_valid_rows = len(valid_rows)
+            if fallback_valid_rows > 0:
+                df_raw_detail = pd.DataFrame(valid_rows, columns=EXPECTED_SQL_COLS)
+        # 再兜底：从混合文本中提取以日期开头的 CSV 行（兼容返回夹杂日志/提示）
+        if df_raw_detail.empty and raw_text:
+            extracted_rows = []
+            for m in re.finditer(r'^"20\d{2}-\d{2}-\d{2}".*$', raw_text or "", flags=re.MULTILINE):
+                line = m.group(0).strip()
+                try:
+                    parsed = next(csv.reader([line]))
+                except Exception:
+                    continue
+                if len(parsed) >= len(EXPECTED_SQL_COLS):
+                    extracted_rows.append(parsed[:len(EXPECTED_SQL_COLS)])
+            if extracted_rows:
+                fallback_valid_rows = len(extracted_rows)
+                df_raw_detail = pd.DataFrame(extracted_rows, columns=EXPECTED_SQL_COLS)
         if debug_sql_mode:
             st.caption(f"clean_sql_response 后 shape: {df_raw_detail.shape}")
             if not df_raw_detail.empty:
@@ -393,6 +437,26 @@ if st.button("🚀 执行 Cohort 深度分析", use_container_width=True):
                 st.dataframe(df_raw_detail.head(5), use_container_width=True)
     if df_raw_detail.empty:
         st.info("📭 该范围内暂无新增用户数据")
+        if raw_text:
+            raw_lines = [ln for ln in (raw_text or "").splitlines() if (ln or "").strip()]
+            st.caption(f"诊断：raw_text 非空，行数={len(raw_lines)}；二次兜底有效行数={fallback_valid_rows}")
+            st.code("\n".join(raw_lines[:5]))
+        st.caption("已自动执行诊断 SQL，帮助定位是否被过滤条件影响。")
+        diag_sql = AdAnalysis.get_empty_result_diagnosis_sql(project_id, start_s, end_s)
+        diag_raw_text, diag_error = client.execute_query(diag_sql)
+        if diag_error:
+            st.warning(f"诊断 SQL 执行失败: {diag_error}")
+        else:
+            try:
+                diag_df = pd.read_csv(io.StringIO((diag_raw_text or "").strip()), engine="python")
+                if not diag_df.empty:
+                    st.markdown("#### 诊断结果")
+                    st.dataframe(diag_df, use_container_width=True, hide_index=True)
+                else:
+                    st.caption("诊断 SQL 返回为空。")
+            except Exception:
+                st.markdown("#### 诊断结果（原始返回）")
+                st.code((diag_raw_text or "")[:2000])
         st.stop()
     if dim_choice == "全量汇总":
         df_agg = prepare_absolute_summary_df(df_raw_detail)
