@@ -82,10 +82,10 @@ class AdAnalysis:
             "WHEN lower(COALESCE(CAST(arbitrary(ev.\"#os\") AS VARCHAR), '')) IN ('android') THEN 'Android' "
             "ELSE 'Unknown' END"
         )
-        # 消耗侧 OS：与 cohort 行为 os_u 一致（#os 优先），再回退 te_ads_object.app_id，使 cost 与 UV 等在同一五维键合并
+        # 消耗侧 OS：行级 #os 优先（勿用 arbitrary：Trino 不允许 GROUP BY 引用含 arbitrary 的 SELECT 位），再回退 te_ads_object.app_id
         os_cost = (
-            "CASE WHEN lower(COALESCE(CAST(arbitrary(\"#os\") AS VARCHAR), '')) IN ('ios', 'apple') THEN 'iOS' "
-            "WHEN lower(COALESCE(CAST(arbitrary(\"#os\") AS VARCHAR), '')) IN ('android') THEN 'Android' "
+            "CASE WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('ios', 'apple') THEN 'iOS' "
+            "WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('android') THEN 'Android' "
             f"WHEN {E}.app_id = 'id6748138347' THEN 'iOS' "
             f"WHEN {E}.app_id = 'com.solitairemanor.secrets' THEN 'Android' "
             "ELSE 'Unknown' END"
@@ -280,10 +280,10 @@ SELECT * FROM (
         """
         today_str = datetime.date.today().strftime("%Y-%m-%d")
         fb_cut = AdAnalysis.FB_COST_PART_DATE_CUTOFF
-        # 全量消耗段 $__OS：与下方 cohort os_display 一致（#os 优先，再 te_ads_object.app_id）
+        # 全量消耗段 $__OS：行级 #os 优先（勿用 arbitrary，否则 GROUP BY 1,2 非法），再回退 te_ads_object.app_id
         os_cost_abs = (
-            "CASE WHEN lower(COALESCE(CAST(arbitrary(\"#os\") AS VARCHAR), '')) IN ('ios', 'apple') THEN 'iOS' "
-            "WHEN lower(COALESCE(CAST(arbitrary(\"#os\") AS VARCHAR), '')) IN ('android') THEN 'Android' "
+            "CASE WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('ios', 'apple') THEN 'iOS' "
+            "WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('android') THEN 'Android' "
             "WHEN te_ads_object.app_id = 'id6748138347' THEN 'iOS' "
             "WHEN te_ads_object.app_id = 'com.solitairemanor.secrets' THEN 'Android' "
             "ELSE 'Unknown' END"
