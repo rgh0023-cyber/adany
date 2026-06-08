@@ -417,6 +417,30 @@ ORDER BY "Date" DESC, "OS" ASC
 """
 
     @staticmethod
+    def get_empty_result_diagnosis_sql(project_id, start_date, end_date):
+        """
+        主查询解析为空时由 app 调用：轻量统计 cohort 窗口内 first_enter_plot 人数与安装日范围，
+        过滤条件与 get_cohort_fine_grain_sql 中 cohort 子查询一致，便于排查是否无用户或被账号/测试过滤。
+        """
+        return f"""
+/* sessionProperties: {{"ignore_downstream_preferences":"true"}} */
+SELECT
+    count(DISTINCT ev."#user_id") AS cohort_first_enter_uv,
+    min(ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time"), 1)) AS min_inst_day,
+    max(ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time"), 1)) AS max_inst_day
+FROM v_event_{project_id} ev
+LEFT JOIN v_user_{project_id} u ON ev."#user_id" = u."#user_id"
+WHERE ev."$part_event" = 'first_enter_plot'
+  AND ev."$part_date" >= '2026-01-01'
+  AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time"), 1) >= TIMESTAMP '{start_date}'
+  AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time"), 1) < date_add('day', 1, TIMESTAMP '{end_date}')
+  AND u."is_test" = false
+  AND coalesce(CAST(u."#account_id" AS VARCHAR), '') NOT IN (
+      '86122677072314368', '85632127382601728', '85631822439923712'
+  )
+"""
+
+    @staticmethod
     def get_advertising_report_sql(project_id, start_date, end_date, dimension="campaign_name"):
         """广告层级：SQL 固定输出计划/组/创意三维；dimension 参数仅保留兼容，不参与 SQL。"""
         return AdAnalysis.get_cohort_fine_grain_sql(project_id, start_date, end_date)
