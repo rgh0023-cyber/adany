@@ -7,7 +7,12 @@ class AdAnalysis:
     - get_absolute_summary_sql（全量）：消耗按 appsflyer **app_id** 拆 OS，与 cohort 行为（#os）分轨 UNION 后按 Date+OS 汇总，
       避免「仅有消耗、无用户」的消耗与用户层级硬拼导致 OS 空/错位。
     - get_cohort_fine_grain_sql / get_advertising_report_sql：广告穿透，消耗与行为均按 计划×组×创意×media×日 与用户 cohort 对齐。
+    - 自 FB_COST_PART_DATE_CUTOFF 起：`appsflyer_master_data` 中 Facebook/Meta 系媒体消耗缺漏，该部分改由
+      `facebook_ad_level_data_by_platform.amount_spent_usd` 统计，维度仍用事件上的 `te_ads_object`，与 master 五维归集一致。
     """
+
+    # 自该 $part_date（含）起：Facebook 系消耗走 facebook_ad_level_data_by_platform；同日及之后 master 侧排除对应媒体以免重复
+    FB_COST_PART_DATE_CUTOFF = "2026-06-03"
 
     @staticmethod
     def get_cohort_fine_grain_sql(project_id, start_date, end_date):
@@ -79,6 +84,12 @@ class AdAnalysis:
             "WHEN lower(COALESCE(CAST(arbitrary(ev.\"#os\") AS VARCHAR), '')) IN ('android') THEN 'Android' "
             "ELSE 'Unknown' END"
         )
+        fb_cut = AdAnalysis.FB_COST_PART_DATE_CUTOFF
+        # Facebook/Meta 系媒体：>= fb_cut 日从 appsflyer 消耗中剔除，改由 facebook 事件承接
+        fb_media_is_meta = (
+            f"(lower(trim(coalesce(cast({E}.\"media_source\" AS VARCHAR), ''))) LIKE '%facebook%' "
+            f"OR lower(trim(coalesce(cast({E}.\"media_source\" AS VARCHAR), ''))) IN ('meta ads'))"
+        )
 
         return f"""
 /* sessionProperties: {{"ignore_downstream_preferences":"true"}} */
@@ -124,7 +135,7 @@ SELECT * FROM (
                 SUM(coalesce(internal_amount_22, 0)) internal_amount_22, SUM(coalesce(internal_amount_23, 0)) internal_amount_23,
                 SUM(coalesce(internal_amount_24, 0)) internal_amount_24
             FROM (
-                -- 消耗(Event Time)，与行为侧同一五维分组键
+                -- 消耗(Event Time)，与行为侧同一五维分组键；>= {fb_cut} 起 FB 消耗走下一分支 facebook 事件
                 SELECT
                     {camp_e} AS dim_campaign,
                     {grp_e} AS dim_ad_group,
@@ -141,6 +152,30 @@ SELECT * FROM (
                     NULL internal_amount_24, {os_e} as os_val
                 FROM v_event_{project_id}
                 WHERE "$part_event" = 'appsflyer_master_data'
+                  AND "$part_date" >= '2026-01-01'
+                  AND ta_date_trunc('day', "#event_time", 1) >= TIMESTAMP '{start_date}'
+                  AND ta_date_trunc('day', "#event_time", 1) < date_add('day', 1, TIMESTAMP '{end_date}')
+                  AND ("$part_date" < '{fb_cut}' OR NOT ({fb_media_is_meta}))
+                GROUP BY 1, 2, 3, 4, 5, 31
+                UNION ALL
+                -- Facebook 平台消耗：与 master 相同五维键与 te_ads_object 归因（Event Time）
+                SELECT
+                    {camp_e} AS dim_campaign,
+                    {grp_e} AS dim_ad_group,
+                    {cre_e} AS dim_ad_name,
+                    {media_e} AS media_source,
+                    ta_date_trunc('day', "#event_time", 1) AS "$__Date_Time",
+                    CAST(coalesce(SUM(CAST(amount_spent_usd AS DOUBLE)), 0) AS DOUBLE) internal_amount_0,
+                    NULL internal_amount_1, NULL internal_amount_2, NULL internal_amount_3, NULL internal_amount_4,
+                    NULL internal_amount_5, NULL internal_amount_6, NULL internal_amount_7, NULL internal_amount_8,
+                    NULL internal_amount_9, NULL internal_amount_10, NULL internal_amount_11, NULL internal_amount_12,
+                    NULL internal_amount_13, NULL internal_amount_14, NULL internal_amount_15, NULL internal_amount_16,
+                    NULL internal_amount_17, NULL internal_amount_18, NULL internal_amount_19, NULL internal_amount_20,
+                    NULL internal_amount_21, NULL internal_amount_22, NULL internal_amount_23,
+                    NULL internal_amount_24, {os_e} as os_val
+                FROM v_event_{project_id}
+                WHERE "$part_event" = 'facebook_ad_level_data_by_platform'
+                  AND "$part_date" >= '{fb_cut}'
                   AND "$part_date" >= '2026-01-01'
                   AND ta_date_trunc('day', "#event_time", 1) >= TIMESTAMP '{start_date}'
                   AND ta_date_trunc('day', "#event_time", 1) < date_add('day', 1, TIMESTAMP '{end_date}')
@@ -244,6 +279,11 @@ SELECT * FROM (
         结果列顺序与 data_processor.expected_cols 一致（含四维占位列，库内为 NULL）。
         """
         today_str = datetime.date.today().strftime("%Y-%m-%d")
+        fb_cut = AdAnalysis.FB_COST_PART_DATE_CUTOFF
+        fb_media_abs = (
+            "(lower(trim(coalesce(cast(te_ads_object.\"media_source\" AS VARCHAR), ''))) LIKE '%facebook%' "
+            "OR lower(trim(coalesce(cast(te_ads_object.\"media_source\" AS VARCHAR), ''))) IN ('meta ads'))"
+        )
         return f"""
 /* sessionProperties: {{"ignore_downstream_preferences":"true"}} */
 SELECT * FROM (
@@ -277,6 +317,24 @@ SELECT * FROM (
             0 AS c18, 0 AS c19, 0 AS c20, 0 AS c21, 0 AS c22, 0 AS c23, 0 AS c24
         FROM v_event_{project_id}
         WHERE "$part_event" = 'appsflyer_master_data'
+          AND "$part_date" >= '2026-01-01'
+          AND ta_date_trunc('day', "#event_time", 1) >= TIMESTAMP '{start_date}'
+          AND ta_date_trunc('day', "#event_time", 1) < date_add('day', 1, TIMESTAMP '{end_date}')
+          AND ("$part_date" < '{fb_cut}' OR NOT ({fb_media_abs}))
+        GROUP BY 1, 2
+        UNION ALL
+        SELECT
+            ta_date_trunc('day', "#event_time", 1) AS "$__Date_Time",
+            CASE WHEN te_ads_object.app_id = 'id6748138347' THEN 'iOS'
+                 WHEN te_ads_object.app_id = 'com.solitairemanor.secrets' THEN 'Android'
+                 ELSE 'Unknown' END AS "$__OS",
+            SUM(CAST(amount_spent_usd AS DOUBLE)) AS c0,
+            0 AS c1, 0 AS c2, 0 AS c3, 0 AS c4, 0 AS c5, 0 AS c6, 0 AS c7, 0 AS c8, 0 AS c9,
+            0 AS c10, 0 AS c11, 0 AS c12, 0 AS c13, 0 AS c14, 0 AS c15, 0 AS c16, 0 AS c17,
+            0 AS c18, 0 AS c19, 0 AS c20, 0 AS c21, 0 AS c22, 0 AS c23, 0 AS c24
+        FROM v_event_{project_id}
+        WHERE "$part_event" = 'facebook_ad_level_data_by_platform'
+          AND "$part_date" >= '{fb_cut}'
           AND "$part_date" >= '2026-01-01'
           AND ta_date_trunc('day', "#event_time", 1) >= TIMESTAMP '{start_date}'
           AND ta_date_trunc('day', "#event_time", 1) < date_add('day', 1, TIMESTAMP '{end_date}')
