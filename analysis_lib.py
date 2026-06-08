@@ -10,7 +10,7 @@ class AdAnalysis:
     - Cohort 口径：用户行为（Plot UV、关卡、IAP 等）仅来自用户相关事件；**仅 Cost** 由 `appsflyer_master_data.cost`
       与（自 FB_COST_PART_DATE_CUTOFF 起）`facebook_ad_level_data_by_platform.amount_spent_usd` 两段合并。
     - 全量汇总：同一 Date×OS 下对两段消耗 **SUM(c0)**，与 cohort 行为段 **SUM** 合并为一张表（总 Cost = 原事件 + Facebook）。
-    - 广告穿透：两段消耗与行为段共用五维键；Facebook 消耗 OS 由 **account_name** 是否含 `iOS`/`Android`（不区分大小写）映射为 **'iOS'/'Android'**（与 cohort 文案一致），再回退 app_id、`#os`。
+    - 广告穿透：消耗 OS 优先用 **account_name**（如 `Bluefocus - Game - iOS - SolitaireSecrets-2` 中含独立 **iOS** 词则标 **iOS**），用 `regexp_like` 词边界匹配，再 **#os**、**app_id**。
     """
 
     # 事件日 >= 此日：Facebook 消耗并入 facebook_ad_level_data_by_platform
@@ -81,19 +81,34 @@ class AdAnalysis:
             "WHEN lower(COALESCE(CAST(arbitrary(ev.\"#os\") AS VARCHAR), '')) IN ('android') THEN 'Android' "
             "ELSE 'Unknown' END"
         )
-        # 消耗侧 OS（AppsFlyer）：费用事件行上 #os 优先，再 te_ads_object.app_id（与 cohort 的 os_u 同源字段但非逐用户对齐）
+        # 费用事件上用于判端的「账户/名称」小写串（数数属性多为双引号 account_name）
+        _acct_nm_lower = (
+            "lower(trim(coalesce(cast(\\\"account_name\\\" AS VARCHAR), '')))"
+        )
+        # account_name 判端：与「Bluefocus - Game - iOS - SolitaireSecrets-2」一致，名称中含独立 iOS/Android 词则该行消耗标为 iOS/Android（再 #os、app_id）
+        # 使用 regexp_like 避免误伤如 radios 中含子串 ios
+        _acct_is_ios = (
+            f"(regexp_like({_acct_nm_lower}, '(^|[^a-z0-9])(iphone|ipad|ipados|ios|apple)([^a-z0-9]|$)') "
+            f"OR strpos({_acct_nm_lower}, '苹果') > 0)"
+        )
+        _acct_is_android = (
+            f"(regexp_like({_acct_nm_lower}, '(^|[^a-z0-9])android([^a-z0-9]|$)') "
+            f"OR strpos({_acct_nm_lower}, '安卓') > 0)"
+        )
+        # 消耗侧 OS（AppsFlyer）：account_name 判端（AF 行常无 #os）→ #os → app_id
         os_cost = (
-            "CASE WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('ios', 'apple') THEN 'iOS' "
+            f"CASE WHEN {_acct_is_ios} THEN 'iOS' "
+            f"WHEN {_acct_is_android} THEN 'Android' "
+            "WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('ios', 'apple') THEN 'iOS' "
             "WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('android') THEN 'Android' "
             f"WHEN {E}.app_id = 'id6748138347' THEN 'iOS' "
             f"WHEN {E}.app_id = 'com.solitairemanor.secrets' THEN 'Android' "
             "ELSE 'Unknown' END"
         )
-        # Facebook：account_name 含 iOS / Android（不区分大小写）→ 输出与 cohort 一致的 'iOS'/'Android'；再 app_id、#os
+        # Facebook 费用：同上 account_name 规则优先，再 app_id、#os
         os_cost_fb = (
-            f"CASE "
-            f"WHEN strpos(lower(trim(coalesce(cast(\\\"account_name\\\" AS VARCHAR), ''))), 'ios') > 0 THEN 'iOS' "
-            f"WHEN strpos(lower(trim(coalesce(cast(\\\"account_name\\\" AS VARCHAR), ''))), 'android') > 0 THEN 'Android' "
+            f"CASE WHEN {_acct_is_ios} THEN 'iOS' "
+            f"WHEN {_acct_is_android} THEN 'Android' "
             f"WHEN {E}.app_id = 'id6748138347' THEN 'iOS' "
             f"WHEN {E}.app_id = 'com.solitairemanor.secrets' THEN 'Android' "
             "WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('ios', 'apple') THEN 'iOS' "
@@ -290,19 +305,29 @@ SELECT * FROM (
         """
         today_str = datetime.date.today().strftime("%Y-%m-%d")
         fb_cut = AdAnalysis.FB_COST_PART_DATE_CUTOFF
-        # 全量 AppsFlyer 消耗：#os 优先；Facebook 消耗：见 os_cost_abs_fb（account_name）
+        _abs_acct_ln = "lower(trim(coalesce(cast(\"account_name\" AS VARCHAR), '')))"
+        _abs_acct_ios = (
+            f"(regexp_like({_abs_acct_ln}, '(^|[^a-z0-9])(iphone|ipad|ipados|ios|apple)([^a-z0-9]|$)') "
+            f"OR strpos({_abs_acct_ln}, '苹果') > 0)"
+        )
+        _abs_acct_android = (
+            f"(regexp_like({_abs_acct_ln}, '(^|[^a-z0-9])android([^a-z0-9]|$)') "
+            f"OR strpos({_abs_acct_ln}, '安卓') > 0)"
+        )
+        # 全量 AppsFlyer 消耗：account_name → #os → app_id（与穿透 os_cost 一致）
         os_cost_abs = (
-            "CASE WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('ios', 'apple') THEN 'iOS' "
+            f"CASE WHEN {_abs_acct_ios} THEN 'iOS' "
+            f"WHEN {_abs_acct_android} THEN 'Android' "
+            "WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('ios', 'apple') THEN 'iOS' "
             "WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('android') THEN 'Android' "
             "WHEN te_ads_object.app_id = 'id6748138347' THEN 'iOS' "
             "WHEN te_ads_object.app_id = 'com.solitairemanor.secrets' THEN 'Android' "
             "ELSE 'Unknown' END"
         )
-        # 全量 Facebook 消耗：account_name 含 iOS/Android → 'iOS'/'Android'（与 cohort 一致），再 app_id、#os
+        # 全量 Facebook 消耗：同上 account_name 扩展匹配，再 app_id、#os
         os_cost_abs_fb = (
-            "CASE "
-            "WHEN strpos(lower(trim(coalesce(cast(\"account_name\" AS VARCHAR), ''))), 'ios') > 0 THEN 'iOS' "
-            "WHEN strpos(lower(trim(coalesce(cast(\"account_name\" AS VARCHAR), ''))), 'android') > 0 THEN 'Android' "
+            f"CASE WHEN {_abs_acct_ios} THEN 'iOS' "
+            f"WHEN {_abs_acct_android} THEN 'Android' "
             "WHEN te_ads_object.app_id = 'id6748138347' THEN 'iOS' "
             "WHEN te_ads_object.app_id = 'com.solitairemanor.secrets' THEN 'Android' "
             "WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('ios', 'apple') THEN 'iOS' "
