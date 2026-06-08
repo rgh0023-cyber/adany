@@ -11,6 +11,7 @@ class AdAnalysis:
       与（自 FB_COST_PART_DATE_CUTOFF 起）`facebook_ad_level_data_by_platform.amount_spent_usd` 两段合并。
     - 全量汇总：同一 Date×OS 下对两段消耗 **SUM(c0)**，与 cohort 行为段 **SUM** 合并为一张表（总 Cost = 原事件 + Facebook）。
     - 广告穿透：消耗 OS 优先用 **account_name**（如含 `-ios-`、` ios `、iphone/ipad 等，不用正则反斜杠），再 **#os**、**app_id**。
+    - 广告穿透媒体：同一计划下 AF 可能上报多种 Facebook 系 `media_source`（如 Facebook Ads / facebook / restricted），统一为 **`facebook`**，避免按媒体拆散。
     """
 
     # 事件日 >= 此日：Facebook 消耗并入 facebook_ad_level_data_by_platform
@@ -60,13 +61,26 @@ class AdAnalysis:
             f"WHEN lower(trim(coalesce(cast({U}.\"ad_name\" AS VARCHAR), ''))) IN ('-', '') THEN '自然量' "
             f"ELSE {U}.\"ad_name\" END"
         )
+        # 自然量判定仍看原始 media 是否空；非自然量时 Facebook/Meta/Instagram 系统一为 'facebook'，避免同计划多字符串拆行
+        _ms_lower_e = f"lower(trim(coalesce(cast({E}.\"media_source\" AS VARCHAR), '')))"
+        _is_fb_media_e = (
+            f"({_ms_lower_e} LIKE '%facebook%' OR {_ms_lower_e} LIKE '%instagram%' "
+            f"OR {_ms_lower_e} LIKE '%audience network%' OR {_ms_lower_e} IN ('restricted', 'fb') "
+            f"OR {_ms_lower_e} LIKE 'meta%')"
+        )
+        _ms_lower_u = f"lower(trim(coalesce(cast({U}.\"media_source\" AS VARCHAR), '')))"
+        _is_fb_media_u = (
+            f"({_ms_lower_u} LIKE '%facebook%' OR {_ms_lower_u} LIKE '%instagram%' "
+            f"OR {_ms_lower_u} LIKE '%audience network%' OR {_ms_lower_u} IN ('restricted', 'fb') "
+            f"OR {_ms_lower_u} LIKE 'meta%')"
+        )
         media_e = (
             f"CASE WHEN {E} IS NULL "
             f"OR lower(trim(coalesce(cast({E}.\"campaign_name\" AS VARCHAR), ''))) IN ('-', '') "
             f"OR lower(trim(coalesce(cast({E}.\"ad_group_name\" AS VARCHAR), ''))) IN ('-', '') "
             f"OR lower(trim(coalesce(cast({E}.\"ad_name\" AS VARCHAR), ''))) IN ('-', '') "
             f"OR lower(trim(coalesce(cast({E}.\"media_source\" AS VARCHAR), ''))) IN ('-', '') "
-            f"THEN 'organic' ELSE {E}.\"media_source\" END"
+            f"THEN 'organic' WHEN {_is_fb_media_e} THEN 'facebook' ELSE {E}.\"media_source\" END"
         )
         media_u = (
             f"CASE WHEN {U} IS NULL "
@@ -74,7 +88,7 @@ class AdAnalysis:
             f"OR lower(trim(coalesce(cast({U}.\"ad_group_name\" AS VARCHAR), ''))) IN ('-', '') "
             f"OR lower(trim(coalesce(cast({U}.\"ad_name\" AS VARCHAR), ''))) IN ('-', '') "
             f"OR lower(trim(coalesce(cast({U}.\"media_source\" AS VARCHAR), ''))) IN ('-', '') "
-            f"THEN 'organic' ELSE {U}.\"media_source\" END"
+            f"THEN 'organic' WHEN {_is_fb_media_u} THEN 'facebook' ELSE {U}.\"media_source\" END"
         )
         os_u = (
             "CASE WHEN lower(COALESCE(CAST(arbitrary(ev.\"#os\") AS VARCHAR), '')) IN ('ios', 'apple') THEN 'iOS' "
@@ -189,12 +203,12 @@ SELECT * FROM (
                   AND ta_date_trunc('day', "#event_time", 1) < date_add('day', 1, TIMESTAMP '{end_date}')
                 GROUP BY 1, 2, 3, 4, 5, 31
                 UNION ALL
-                -- 自 {fb_cut} 起 Facebook 消耗：os_val 用 os_cost_fb（account_name 含 iOS/Android → 与 cohort OS 文案一致）
+                -- 自 {fb_cut} 起 Facebook 消耗：媒体固定为 facebook（不读 te_ads_object.media_source，避免与 cohort 键不一致）
                 SELECT
                     {camp_e} AS dim_campaign,
                     {grp_e} AS dim_ad_group,
                     {cre_e} AS dim_ad_name,
-                    {media_e} AS media_source,
+                    'facebook' AS media_source,
                     ta_date_trunc('day', "#event_time", 1) AS "$__Date_Time",
                     CAST(coalesce(SUM(CAST(coalesce("amount_spent_usd", amount_spent_usd) AS DOUBLE)), 0) AS DOUBLE) internal_amount_0,
                     NULL internal_amount_1, NULL internal_amount_2, NULL internal_amount_3, NULL internal_amount_4,
