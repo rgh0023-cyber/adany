@@ -8,11 +8,14 @@ class AdAnalysis:
       避免「仅有消耗、无用户」的消耗与用户层级硬拼导致 OS 空/错位。
     - get_cohort_fine_grain_sql / get_advertising_report_sql：广告穿透，消耗与行为均按 计划×组×创意×media×日 与用户 cohort 对齐。
     - 自 FB_COST_PART_DATE_CUTOFF 起（按 #event_time）：`appsflyer_master_data` 已无 Facebook 消耗，改由
-      `facebook_ad_level_data_by_platform.amount_spent_usd` 补全；归集维度与 master 完全一致（同一套 te_ads_object：campaign / ad_group / ad_name / media_source / app_id）。
+      `facebook_ad_level_data_by_platform.amount_spent_usd` 补全；计划/组/创意仍用 te_ads_object 与 master 一致，
+      「Media Source」对该事件使用固定常量 FB_EVENT_FIXED_MEDIA_SOURCE（不再读事件上的 media_source）。
     """
 
-    # 事件日 >= 此日：Facebook 消耗仅来自 facebook_ad_level_data_by_platform（与 appsflyer 五维键一致，媒体即 te_ads_object.media_source 经 media_e 展示）
+    # 事件日 >= 此日：Facebook 消耗仅来自 facebook_ad_level_data_by_platform
     FB_COST_PART_DATE_CUTOFF = "2026-06-03"
+    # facebook_ad_level_data_by_platform 在穿透结果中「媒体源」列使用的固定值（与 appsflyer 的 media_e 分离）
+    FB_EVENT_FIXED_MEDIA_SOURCE = "Facebook Ads"
 
     @staticmethod
     def get_cohort_fine_grain_sql(project_id, start_date, end_date):
@@ -85,6 +88,7 @@ class AdAnalysis:
             "ELSE 'Unknown' END"
         )
         fb_cut = AdAnalysis.FB_COST_PART_DATE_CUTOFF
+        fb_media_lit = "'" + AdAnalysis.FB_EVENT_FIXED_MEDIA_SOURCE.replace("'", "''") + "'"
 
         return f"""
 /* sessionProperties: {{"ignore_downstream_preferences":"true"}} */
@@ -152,12 +156,12 @@ SELECT * FROM (
                   AND ta_date_trunc('day', "#event_time", 1) < date_add('day', 1, TIMESTAMP '{end_date}')
                 GROUP BY 1, 2, 3, 4, 5, 31
                 UNION ALL
-                -- 自 {fb_cut} 起 Facebook 消耗：与 master 同一套 te_ads_object 归集（media_source 经 media_e 展示为「Media Source」）
+                -- 自 {fb_cut} 起 Facebook 消耗：计划/组/创意与 master 同一套 te_ads_object；媒体源为固定常量（见 FB_EVENT_FIXED_MEDIA_SOURCE）
                 SELECT
                     {camp_e} AS dim_campaign,
                     {grp_e} AS dim_ad_group,
                     {cre_e} AS dim_ad_name,
-                    {media_e} AS media_source,
+                    {fb_media_lit} AS media_source,
                     ta_date_trunc('day', "#event_time", 1) AS "$__Date_Time",
                     CAST(coalesce(SUM(CAST(coalesce("amount_spent_usd", amount_spent_usd) AS DOUBLE)), 0) AS DOUBLE) internal_amount_0,
                     NULL internal_amount_1, NULL internal_amount_2, NULL internal_amount_3, NULL internal_amount_4,
