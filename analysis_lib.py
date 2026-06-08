@@ -10,8 +10,7 @@ class AdAnalysis:
     - Cohort 口径：用户行为（Plot UV、关卡、IAP 等）仅来自用户相关事件；**仅 Cost** 由 `appsflyer_master_data.cost`
       与（自 FB_COST_PART_DATE_CUTOFF 起）`facebook_ad_level_data_by_platform.amount_spent_usd` 两段合并。
     - 全量汇总：同一 Date×OS 下对两段消耗 **SUM(c0)**，与 cohort 行为段 **SUM** 合并为一张表（总 Cost = 原事件 + Facebook）。
-    - 广告穿透：两段消耗与行为段共用五维键 **(campaign, ad_group, ad_name, media_source, os_val, $__Date_Time)**；
-      消耗侧维度与 **cohort 侧同源规则**（te_ads_object 的 camp/grp/cre/media_e；OS 与 cohort 一致：**#os 优先**，再回退 app_id），使 Facebook cost **归并到同一行 cohort 指标**。
+    - 广告穿透：两段消耗与行为段共用五维键；Facebook 消耗 OS 由 **account_name** 是否含 `iOS`/`Android`（不区分大小写）映射为 **'iOS'/'Android'**（与 cohort 文案一致），再回退 app_id、`#os`。
     """
 
     # 事件日 >= 此日：Facebook 消耗并入 facebook_ad_level_data_by_platform
@@ -90,9 +89,11 @@ class AdAnalysis:
             f"WHEN {E}.app_id = 'com.solitairemanor.secrets' THEN 'Android' "
             "ELSE 'Unknown' END"
         )
-        # Facebook 费用事件常无 #os：app_id 优先，减少 Unknown、便于与 cohort iOS/Android 桶合并
+        # Facebook：account_name 含 iOS / Android（不区分大小写）→ 输出与 cohort 一致的 'iOS'/'Android'；再 app_id、#os
         os_cost_fb = (
             f"CASE "
+            f"WHEN strpos(lower(trim(coalesce(cast(\\\"account_name\\\" AS VARCHAR), ''))), 'ios') > 0 THEN 'iOS' "
+            f"WHEN strpos(lower(trim(coalesce(cast(\\\"account_name\\\" AS VARCHAR), ''))), 'android') > 0 THEN 'Android' "
             f"WHEN {E}.app_id = 'id6748138347' THEN 'iOS' "
             f"WHEN {E}.app_id = 'com.solitairemanor.secrets' THEN 'Android' "
             "WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('ios', 'apple') THEN 'iOS' "
@@ -167,7 +168,7 @@ SELECT * FROM (
                   AND ta_date_trunc('day', "#event_time", 1) < date_add('day', 1, TIMESTAMP '{end_date}')
                 GROUP BY 1, 2, 3, 4, 5, 31
                 UNION ALL
-                -- 自 {fb_cut} 起 Facebook 消耗：os_val 用 os_cost_fb（app_id 优先，因费用事件常无 #os）
+                -- 自 {fb_cut} 起 Facebook 消耗：os_val 用 os_cost_fb（account_name 含 iOS/Android → 与 cohort OS 文案一致）
                 SELECT
                     {camp_e} AS dim_campaign,
                     {grp_e} AS dim_ad_group,
@@ -289,7 +290,7 @@ SELECT * FROM (
         """
         today_str = datetime.date.today().strftime("%Y-%m-%d")
         fb_cut = AdAnalysis.FB_COST_PART_DATE_CUTOFF
-        # 全量 AppsFlyer 消耗：#os 优先；Facebook 消耗：app_id 优先（费用事件常无 #os）
+        # 全量 AppsFlyer 消耗：#os 优先；Facebook 消耗：见 os_cost_abs_fb（account_name）
         os_cost_abs = (
             "CASE WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('ios', 'apple') THEN 'iOS' "
             "WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('android') THEN 'Android' "
@@ -297,8 +298,12 @@ SELECT * FROM (
             "WHEN te_ads_object.app_id = 'com.solitairemanor.secrets' THEN 'Android' "
             "ELSE 'Unknown' END"
         )
+        # 全量 Facebook 消耗：account_name 含 iOS/Android → 'iOS'/'Android'（与 cohort 一致），再 app_id、#os
         os_cost_abs_fb = (
-            "CASE WHEN te_ads_object.app_id = 'id6748138347' THEN 'iOS' "
+            "CASE "
+            "WHEN strpos(lower(trim(coalesce(cast(\"account_name\" AS VARCHAR), ''))), 'ios') > 0 THEN 'iOS' "
+            "WHEN strpos(lower(trim(coalesce(cast(\"account_name\" AS VARCHAR), ''))), 'android') > 0 THEN 'Android' "
+            "WHEN te_ads_object.app_id = 'id6748138347' THEN 'iOS' "
             "WHEN te_ads_object.app_id = 'com.solitairemanor.secrets' THEN 'Android' "
             "WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('ios', 'apple') THEN 'iOS' "
             "WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('android') THEN 'Android' "
