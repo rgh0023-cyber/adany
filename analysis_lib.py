@@ -10,7 +10,7 @@ class AdAnalysis:
     - Cohort 口径：用户行为（Plot UV、关卡、IAP 等）仅来自用户相关事件；**仅 Cost** 由 `appsflyer_master_data.cost`
       与（自 FB_COST_PART_DATE_CUTOFF 起）`facebook_ad_level_data_by_platform.amount_spent_usd` 两段合并。
     - 全量汇总：同一 Date×OS 下对两段消耗 **SUM(c0)**，与 cohort 行为段 **SUM** 合并为一张表（总 Cost = 原事件 + Facebook）。
-    - 广告穿透：消耗 OS 优先用 **account_name**（如 `Bluefocus - Game - iOS - SolitaireSecrets-2` 中含独立 **iOS** 词则标 **iOS**），用 `regexp_like` 词边界匹配，再 **#os**、**app_id**。
+    - 广告穿透：消耗 OS 优先用 **account_name**（如含 `-ios-`、` ios `、iphone/ipad 等，不用正则反斜杠），再 **#os**、**app_id**。
     """
 
     # 事件日 >= 此日：Facebook 消耗并入 facebook_ad_level_data_by_platform
@@ -82,17 +82,23 @@ class AdAnalysis:
             "ELSE 'Unknown' END"
         )
         # 费用事件上用于判端的「账户/名称」小写串（数数属性多为双引号 account_name）
+        # 须用 cast(\"account_name\" …)，勿写成 \\\"…\\\"，否则 SQL 里会出现字面量 \，Open SQL 解析报错
         _acct_nm_lower = (
-            "lower(trim(coalesce(cast(\\\"account_name\\\" AS VARCHAR), '')))"
+            "lower(trim(coalesce(cast(\"account_name\" AS VARCHAR), '')))"
         )
-        # account_name 判端：与「Bluefocus - Game - iOS - SolitaireSecrets-2」一致，名称中含独立 iOS/Android 词则该行消耗标为 iOS/Android（再 #os、app_id）
-        # 使用 regexp_like 避免误伤如 radios 中含子串 ios
+        # account_name 判端：如 Bluefocus - Game - iOS - …（小写后含 -ios-、 ios 等分隔形式）；不用 regexp_like，避免数数 SQL 对反斜杠解析报错
         _acct_is_ios = (
-            f"(regexp_like({_acct_nm_lower}, '(^|[^a-z0-9])(iphone|ipad|ipados|ios|apple)([^a-z0-9]|$)') "
+            f"({_acct_nm_lower} LIKE '% ios %' OR {_acct_nm_lower} LIKE '%-ios-%' OR {_acct_nm_lower} LIKE '%-ios %' "
+            f"OR {_acct_nm_lower} LIKE '% ios-%' OR {_acct_nm_lower} LIKE 'ios %' OR {_acct_nm_lower} LIKE 'ios-%' "
+            f"OR {_acct_nm_lower} LIKE '%-ios' OR {_acct_nm_lower} = 'ios' "
+            f"OR strpos({_acct_nm_lower}, 'iphone') > 0 OR strpos({_acct_nm_lower}, 'ipad') > 0 "
+            f"OR strpos({_acct_nm_lower}, 'ipados') > 0 OR strpos({_acct_nm_lower}, 'apple') > 0 "
             f"OR strpos({_acct_nm_lower}, '苹果') > 0)"
         )
         _acct_is_android = (
-            f"(regexp_like({_acct_nm_lower}, '(^|[^a-z0-9])android([^a-z0-9]|$)') "
+            f"({_acct_nm_lower} LIKE '% android %' OR {_acct_nm_lower} LIKE '%-android-%' OR {_acct_nm_lower} LIKE '%-android %' "
+            f"OR {_acct_nm_lower} LIKE '% android-%' OR {_acct_nm_lower} LIKE 'android %' OR {_acct_nm_lower} LIKE 'android-%' "
+            f"OR {_acct_nm_lower} LIKE '%-android' OR {_acct_nm_lower} = 'android' "
             f"OR strpos({_acct_nm_lower}, '安卓') > 0)"
         )
         # 消耗侧 OS（AppsFlyer）：account_name 判端（AF 行常无 #os）→ #os → app_id
@@ -307,11 +313,17 @@ SELECT * FROM (
         fb_cut = AdAnalysis.FB_COST_PART_DATE_CUTOFF
         _abs_acct_ln = "lower(trim(coalesce(cast(\"account_name\" AS VARCHAR), '')))"
         _abs_acct_ios = (
-            f"(regexp_like({_abs_acct_ln}, '(^|[^a-z0-9])(iphone|ipad|ipados|ios|apple)([^a-z0-9]|$)') "
+            f"({_abs_acct_ln} LIKE '% ios %' OR {_abs_acct_ln} LIKE '%-ios-%' OR {_abs_acct_ln} LIKE '%-ios %' "
+            f"OR {_abs_acct_ln} LIKE '% ios-%' OR {_abs_acct_ln} LIKE 'ios %' OR {_abs_acct_ln} LIKE 'ios-%' "
+            f"OR {_abs_acct_ln} LIKE '%-ios' OR {_abs_acct_ln} = 'ios' "
+            f"OR strpos({_abs_acct_ln}, 'iphone') > 0 OR strpos({_abs_acct_ln}, 'ipad') > 0 "
+            f"OR strpos({_abs_acct_ln}, 'ipados') > 0 OR strpos({_abs_acct_ln}, 'apple') > 0 "
             f"OR strpos({_abs_acct_ln}, '苹果') > 0)"
         )
         _abs_acct_android = (
-            f"(regexp_like({_abs_acct_ln}, '(^|[^a-z0-9])android([^a-z0-9]|$)') "
+            f"({_abs_acct_ln} LIKE '% android %' OR {_abs_acct_ln} LIKE '%-android-%' OR {_abs_acct_ln} LIKE '%-android %' "
+            f"OR {_abs_acct_ln} LIKE '% android-%' OR {_abs_acct_ln} LIKE 'android %' OR {_abs_acct_ln} LIKE 'android-%' "
+            f"OR {_abs_acct_ln} LIKE '%-android' OR {_abs_acct_ln} = 'android' "
             f"OR strpos({_abs_acct_ln}, '安卓') > 0)"
         )
         # 全量 AppsFlyer 消耗：account_name → #os → app_id（与穿透 os_cost 一致）
