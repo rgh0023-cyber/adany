@@ -82,12 +82,21 @@ class AdAnalysis:
             "WHEN lower(COALESCE(CAST(arbitrary(ev.\"#os\") AS VARCHAR), '')) IN ('android') THEN 'Android' "
             "ELSE 'Unknown' END"
         )
-        # 消耗侧 OS：行级 #os 优先（勿用 arbitrary：Trino 不允许 GROUP BY 引用含 arbitrary 的 SELECT 位），再回退 te_ads_object.app_id
+        # 消耗侧 OS（AppsFlyer）：费用事件行上 #os 优先，再 te_ads_object.app_id（与 cohort 的 os_u 同源字段但非逐用户对齐）
         os_cost = (
             "CASE WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('ios', 'apple') THEN 'iOS' "
             "WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('android') THEN 'Android' "
             f"WHEN {E}.app_id = 'id6748138347' THEN 'iOS' "
             f"WHEN {E}.app_id = 'com.solitairemanor.secrets' THEN 'Android' "
+            "ELSE 'Unknown' END"
+        )
+        # Facebook 费用事件常无 #os：app_id 优先，减少 Unknown、便于与 cohort iOS/Android 桶合并
+        os_cost_fb = (
+            f"CASE "
+            f"WHEN {E}.app_id = 'id6748138347' THEN 'iOS' "
+            f"WHEN {E}.app_id = 'com.solitairemanor.secrets' THEN 'Android' "
+            "WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('ios', 'apple') THEN 'iOS' "
+            "WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('android') THEN 'Android' "
             "ELSE 'Unknown' END"
         )
         fb_cut = AdAnalysis.FB_COST_PART_DATE_CUTOFF
@@ -158,7 +167,7 @@ SELECT * FROM (
                   AND ta_date_trunc('day', "#event_time", 1) < date_add('day', 1, TIMESTAMP '{end_date}')
                 GROUP BY 1, 2, 3, 4, 5, 31
                 UNION ALL
-                -- 自 {fb_cut} 起 Facebook 消耗：与 appsflyer 相同 te_ads_object 五维 + media_e；仅 internal_amount_0 为 cost，其余 NULL，与下方 cohort 行为 UNION 后按键 SUM 合并到同一行
+                -- 自 {fb_cut} 起 Facebook 消耗：os_val 用 os_cost_fb（app_id 优先，因费用事件常无 #os）
                 SELECT
                     {camp_e} AS dim_campaign,
                     {grp_e} AS dim_ad_group,
@@ -172,7 +181,7 @@ SELECT * FROM (
                     NULL internal_amount_13, NULL internal_amount_14, NULL internal_amount_15, NULL internal_amount_16,
                     NULL internal_amount_17, NULL internal_amount_18, NULL internal_amount_19, NULL internal_amount_20,
                     NULL internal_amount_21, NULL internal_amount_22, NULL internal_amount_23,
-                    NULL internal_amount_24, {os_cost} as os_val
+                    NULL internal_amount_24, {os_cost_fb} as os_val
                 FROM v_event_{project_id}
                 WHERE "$part_event" = 'facebook_ad_level_data_by_platform'
                   AND "$part_date" >= '2026-01-01'
@@ -280,12 +289,19 @@ SELECT * FROM (
         """
         today_str = datetime.date.today().strftime("%Y-%m-%d")
         fb_cut = AdAnalysis.FB_COST_PART_DATE_CUTOFF
-        # 全量消耗段 $__OS：行级 #os 优先（勿用 arbitrary，否则 GROUP BY 1,2 非法），再回退 te_ads_object.app_id
+        # 全量 AppsFlyer 消耗：#os 优先；Facebook 消耗：app_id 优先（费用事件常无 #os）
         os_cost_abs = (
             "CASE WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('ios', 'apple') THEN 'iOS' "
             "WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('android') THEN 'Android' "
             "WHEN te_ads_object.app_id = 'id6748138347' THEN 'iOS' "
             "WHEN te_ads_object.app_id = 'com.solitairemanor.secrets' THEN 'Android' "
+            "ELSE 'Unknown' END"
+        )
+        os_cost_abs_fb = (
+            "CASE WHEN te_ads_object.app_id = 'id6748138347' THEN 'iOS' "
+            "WHEN te_ads_object.app_id = 'com.solitairemanor.secrets' THEN 'Android' "
+            "WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('ios', 'apple') THEN 'iOS' "
+            "WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('android') THEN 'Android' "
             "ELSE 'Unknown' END"
         )
         return f"""
@@ -326,7 +342,7 @@ SELECT * FROM (
         UNION ALL
         SELECT
             ta_date_trunc('day', "#event_time", 1) AS "$__Date_Time",
-            {os_cost_abs} AS "$__OS",
+            {os_cost_abs_fb} AS "$__OS",
             SUM(CAST(coalesce("amount_spent_usd", amount_spent_usd) AS DOUBLE)) AS c0,
             0 AS c1, 0 AS c2, 0 AS c3, 0 AS c4, 0 AS c5, 0 AS c6, 0 AS c7, 0 AS c8, 0 AS c9,
             0 AS c10, 0 AS c11, 0 AS c12, 0 AS c13, 0 AS c14, 0 AS c15, 0 AS c16, 0 AS c17,
