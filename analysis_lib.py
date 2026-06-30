@@ -11,14 +11,55 @@ class AdAnalysis:
       与（自 FB_COST_PART_DATE_CUTOFF 起）`facebook_ad_level_data_by_platform.amount_spent_usd`、
       （自 UNITY_COST_PART_DATE_CUTOFF 起）`unity_ads_api_data.spend` 分段合并。
     - 全量汇总：同一 Date×OS 下对各段消耗 **SUM(c0)**，与 cohort 行为段 **SUM** 合并为一张表。
-    - 广告穿透：消耗 OS 优先用 **account_name**（如含 `-ios-`、` ios `、iphone/ipad 等，不用正则反斜杠），再 **#os**、**app_id**。
+    - 广告穿透：Facebook 消耗 OS 用 **account_name** → **app_id** → **#os**；
+      Unity 消耗 OS 用事件 **platform** / **store**（先 lower 再匹配，兼容 iOS/IOS/ios），再 account_name → app_id → #os。
     - 广告穿透媒体：Facebook 系统一为 **`facebook`**；Unity 系统一为 **`unityads_int`**，避免与 cohort 键不一致。
+    - Unity 消耗归因与 Facebook 相同：计划/组/创意均读 **te_ads_object**（campaign_name / ad_group_name / ad_name）。
     """
 
     # 事件日 >= 此日：Facebook 消耗并入 facebook_ad_level_data_by_platform
     FB_COST_PART_DATE_CUTOFF = "2026-06-03"
     # 事件日 >= 此日：Unity 消耗并入 unity_ads_api_data（AF 侧 unityads_int 无 cost）
     UNITY_COST_PART_DATE_CUTOFF = "2026-01-01"
+
+    @staticmethod
+    def _unity_os_cost_sql(te_obj='"te_ads_object"', acct_is_ios_expr="", acct_is_android_expr=""):
+        """Unity API 消耗 OS：platform / store 优先；匹配前统一 lower(trim())，兼容 iOS/IOS/ios 等写法。"""
+        # 与 spend 类似，兼容数数双引号 / 无引号属性名；输出固定为 cohort 侧使用的 iOS / Android
+        plat = (
+            "lower(trim(coalesce("
+            "cast(\"platform\" AS VARCHAR), "
+            "cast(platform AS VARCHAR), "
+            f"cast({te_obj}.\"platform\" AS VARCHAR), "
+            "''"
+            ")))"
+        )
+        store = (
+            "lower(trim(coalesce("
+            "cast(\"store\" AS VARCHAR), "
+            "cast(store AS VARCHAR), "
+            f"cast({te_obj}.\"store\" AS VARCHAR), "
+            "''"
+            ")))"
+        )
+        os_raw = "lower(trim(coalesce(cast(\"#os\" AS VARCHAR), '')))"
+        return (
+            f"CASE "
+            f"WHEN {plat} IN ('ios', 'iphone', 'ipad', 'ipados', 'apple', 'itunes') THEN 'iOS' "
+            f"WHEN {plat} LIKE 'ios%' OR {plat} LIKE 'iphone%' OR {plat} LIKE 'ipad%' THEN 'iOS' "
+            f"WHEN {store} IN ('apple', 'ios', 'itunes', 'app_store', 'appstore') THEN 'iOS' "
+            f"WHEN {store} LIKE 'apple%' OR {store} LIKE 'ios%' THEN 'iOS' "
+            f"WHEN {plat} IN ('android', 'andr') OR {plat} LIKE 'android%' THEN 'Android' "
+            f"WHEN {store} IN ('google', 'android', 'google_play', 'play') THEN 'Android' "
+            f"WHEN {store} LIKE 'google%' OR {store} LIKE 'android%' THEN 'Android' "
+            f"WHEN {acct_is_ios_expr} THEN 'iOS' "
+            f"WHEN {acct_is_android_expr} THEN 'Android' "
+            f"WHEN {te_obj}.app_id = 'id6748138347' THEN 'iOS' "
+            f"WHEN {te_obj}.app_id = 'com.solitairemanor.secrets' THEN 'Android' "
+            f"WHEN {os_raw} IN ('ios', 'apple', 'iphone', 'ipad', 'ipados') THEN 'iOS' "
+            f"WHEN {os_raw} IN ('android') OR {os_raw} LIKE 'android%' THEN 'Android' "
+            "ELSE 'Unknown' END"
+        )
 
     @staticmethod
     def get_cohort_fine_grain_sql(project_id, start_date, end_date):
@@ -136,7 +177,7 @@ class AdAnalysis:
             f"WHEN {E}.app_id = 'com.solitairemanor.secrets' THEN 'Android' "
             "ELSE 'Unknown' END"
         )
-        # Facebook / Unity API 费用：同上 account_name 规则优先，再 app_id、#os
+        # Facebook API 费用：account_name 规则优先，再 app_id、#os
         os_cost_api = (
             f"CASE WHEN {_acct_is_ios} THEN 'iOS' "
             f"WHEN {_acct_is_android} THEN 'Android' "
@@ -146,6 +187,7 @@ class AdAnalysis:
             "WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('android') THEN 'Android' "
             "ELSE 'Unknown' END"
         )
+        os_cost_unity = AdAnalysis._unity_os_cost_sql(E, _acct_is_ios, _acct_is_android)
         fb_cut = AdAnalysis.FB_COST_PART_DATE_CUTOFF
         unity_cut = AdAnalysis.UNITY_COST_PART_DATE_CUTOFF
 
@@ -238,7 +280,7 @@ SELECT * FROM (
                   AND ta_date_trunc('day', "#event_time", 1) < date_add('day', 1, TIMESTAMP '{end_date}')
                 GROUP BY 1, 2, 3, 4, 5, 31
                 UNION ALL
-                -- 自 {unity_cut} 起 Unity 消耗：媒体固定为 unityads_int（AF 侧无 cost，不读 te_ads_object.media_source）
+                -- 自 {unity_cut} 起 Unity 消耗：媒体 unityads_int；归因 te_ads_object；OS 读 platform
                 SELECT
                     {camp_e} AS dim_campaign,
                     {grp_e} AS dim_ad_group,
@@ -252,7 +294,7 @@ SELECT * FROM (
                     NULL internal_amount_13, NULL internal_amount_14, NULL internal_amount_15, NULL internal_amount_16,
                     NULL internal_amount_17, NULL internal_amount_18, NULL internal_amount_19, NULL internal_amount_20,
                     NULL internal_amount_21, NULL internal_amount_22, NULL internal_amount_23,
-                    NULL internal_amount_24, {os_cost_api} as os_val
+                    NULL internal_amount_24, {os_cost_unity} as os_val
                 FROM v_event_{project_id}
                 WHERE "$part_event" = 'unity_ads_api_data'
                   AND "$part_date" >= '2026-01-01'
@@ -386,7 +428,7 @@ SELECT * FROM (
             "WHEN te_ads_object.app_id = 'com.solitairemanor.secrets' THEN 'Android' "
             "ELSE 'Unknown' END"
         )
-        # 全量 Facebook / Unity API 消耗：同上 account_name 扩展匹配，再 app_id、#os
+        # 全量 Facebook API 消耗：account_name 扩展匹配，再 app_id、#os
         os_cost_abs_api = (
             f"CASE WHEN {_abs_acct_ios} THEN 'iOS' "
             f"WHEN {_abs_acct_android} THEN 'Android' "
@@ -396,6 +438,7 @@ SELECT * FROM (
             "WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('android') THEN 'Android' "
             "ELSE 'Unknown' END"
         )
+        os_cost_abs_unity = AdAnalysis._unity_os_cost_sql("te_ads_object", _abs_acct_ios, _abs_acct_android)
         return f"""
 /* sessionProperties: {{"ignore_downstream_preferences":"true"}} */
 SELECT * FROM (
@@ -449,7 +492,7 @@ SELECT * FROM (
         UNION ALL
         SELECT
             ta_date_trunc('day', "#event_time", 1) AS "$__Date_Time",
-            {os_cost_abs_api} AS "$__OS",
+            {os_cost_abs_unity} AS "$__OS",
             SUM(CAST(coalesce("spend", spend) AS DOUBLE)) AS c0,
             0 AS c1, 0 AS c2, 0 AS c3, 0 AS c4, 0 AS c5, 0 AS c6, 0 AS c7, 0 AS c8, 0 AS c9,
             0 AS c10, 0 AS c11, 0 AS c12, 0 AS c13, 0 AS c14, 0 AS c15, 0 AS c16, 0 AS c17,
