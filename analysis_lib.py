@@ -12,9 +12,9 @@ class AdAnalysis:
       （自 UNITY_COST_PART_DATE_CUTOFF 起）`unity_ads_api_data.spend` 分段合并。
     - 全量汇总：同一 Date×OS 下对各段消耗 **SUM(c0)**，与 cohort 行为段 **SUM** 合并为一张表。
     - 广告穿透：Facebook 消耗 OS 用 **account_name** → **app_id** → **#os**；
-      Unity 消耗 OS 用事件 **platform** / **store**（先 lower 再匹配，兼容 iOS/IOS/ios），再 account_name → app_id → #os。
+      Unity 消耗 OS 仅用事件顶层 **platform** / **store**（先 lower 再匹配，兼容 iOS/IOS/ios），再 app_id、#os 兜底；
+      归因计划/组/创意仍只读 **te_ads_object**。
     - 广告穿透媒体：Facebook 系统一为 **`facebook`**；Unity 系统一为 **`unityads_int`**，避免与 cohort 键不一致。
-    - Unity 消耗归因与 Facebook 相同：计划/组/创意均读 **te_ads_object**（campaign_name / ad_group_name / ad_name）。
     """
 
     # 事件日 >= 此日：Facebook 消耗并入 facebook_ad_level_data_by_platform
@@ -23,14 +23,12 @@ class AdAnalysis:
     UNITY_COST_PART_DATE_CUTOFF = "2026-01-01"
 
     @staticmethod
-    def _unity_os_cost_sql(te_obj='"te_ads_object"', acct_is_ios_expr="", acct_is_android_expr=""):
-        """Unity API 消耗 OS：platform / store 优先；匹配前统一 lower(trim())，兼容 iOS/IOS/ios 等写法。"""
-        # 与 spend 类似，兼容数数双引号 / 无引号属性名；输出固定为 cohort 侧使用的 iOS / Android
+    def _unity_os_cost_sql(te_obj='"te_ads_object"'):
+        """Unity API 消耗 OS：仅事件顶层 platform / store（不在 te_ads_object 内）；先 lower 再匹配。"""
         plat = (
             "lower(trim(coalesce("
             "cast(\"platform\" AS VARCHAR), "
             "cast(platform AS VARCHAR), "
-            f"cast({te_obj}.\"platform\" AS VARCHAR), "
             "''"
             ")))"
         )
@@ -38,7 +36,6 @@ class AdAnalysis:
             "lower(trim(coalesce("
             "cast(\"store\" AS VARCHAR), "
             "cast(store AS VARCHAR), "
-            f"cast({te_obj}.\"store\" AS VARCHAR), "
             "''"
             ")))"
         )
@@ -52,8 +49,6 @@ class AdAnalysis:
             f"WHEN {plat} IN ('android', 'andr') OR {plat} LIKE 'android%' THEN 'Android' "
             f"WHEN {store} IN ('google', 'android', 'google_play', 'play') THEN 'Android' "
             f"WHEN {store} LIKE 'google%' OR {store} LIKE 'android%' THEN 'Android' "
-            f"WHEN {acct_is_ios_expr} THEN 'iOS' "
-            f"WHEN {acct_is_android_expr} THEN 'Android' "
             f"WHEN {te_obj}.app_id = 'id6748138347' THEN 'iOS' "
             f"WHEN {te_obj}.app_id = 'com.solitairemanor.secrets' THEN 'Android' "
             f"WHEN {os_raw} IN ('ios', 'apple', 'iphone', 'ipad', 'ipados') THEN 'iOS' "
@@ -187,7 +182,7 @@ class AdAnalysis:
             "WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('android') THEN 'Android' "
             "ELSE 'Unknown' END"
         )
-        os_cost_unity = AdAnalysis._unity_os_cost_sql(E, _acct_is_ios, _acct_is_android)
+        os_cost_unity = AdAnalysis._unity_os_cost_sql(E)
         fb_cut = AdAnalysis.FB_COST_PART_DATE_CUTOFF
         unity_cut = AdAnalysis.UNITY_COST_PART_DATE_CUTOFF
 
@@ -438,7 +433,7 @@ SELECT * FROM (
             "WHEN lower(trim(coalesce(cast(\"#os\" AS VARCHAR), ''))) IN ('android') THEN 'Android' "
             "ELSE 'Unknown' END"
         )
-        os_cost_abs_unity = AdAnalysis._unity_os_cost_sql("te_ads_object", _abs_acct_ios, _abs_acct_android)
+        os_cost_abs_unity = AdAnalysis._unity_os_cost_sql("te_ads_object")
         return f"""
 /* sessionProperties: {{"ignore_downstream_preferences":"true"}} */
 SELECT * FROM (
