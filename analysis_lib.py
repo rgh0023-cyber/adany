@@ -8,14 +8,17 @@ class AdAnalysis:
       避免「仅有消耗、无用户」的消耗与用户层级硬拼导致 OS 空/错位。
     - get_cohort_fine_grain_sql / get_advertising_report_sql：广告穿透，消耗与行为均按 计划×组×创意×media×日 与用户 cohort 对齐。
     - Cohort 口径：用户行为（Plot UV、关卡、IAP 等）仅来自用户相关事件；**仅 Cost** 由 `appsflyer_master_data.cost`
-      与（自 FB_COST_PART_DATE_CUTOFF 起）`facebook_ad_level_data_by_platform.amount_spent_usd` 两段合并。
-    - 全量汇总：同一 Date×OS 下对两段消耗 **SUM(c0)**，与 cohort 行为段 **SUM** 合并为一张表（总 Cost = 原事件 + Facebook）。
+      与（自 FB_COST_PART_DATE_CUTOFF 起）`facebook_ad_level_data_by_platform.amount_spent_usd`、
+      （自 UNITY_COST_PART_DATE_CUTOFF 起）`unity_ads_api_data.spend` 分段合并。
+    - 全量汇总：同一 Date×OS 下对各段消耗 **SUM(c0)**，与 cohort 行为段 **SUM** 合并为一张表。
     - 广告穿透：消耗 OS 优先用 **account_name**（如含 `-ios-`、` ios `、iphone/ipad 等，不用正则反斜杠），再 **#os**、**app_id**。
-    - 广告穿透媒体：同一计划下 AF 可能上报多种 Facebook 系 `media_source`（如 Facebook Ads / facebook / restricted），统一为 **`facebook`**，避免按媒体拆散。
+    - 广告穿透媒体：Facebook 系统一为 **`facebook`**；Unity 系统一为 **`unityads_int`**，避免与 cohort 键不一致。
     """
 
     # 事件日 >= 此日：Facebook 消耗并入 facebook_ad_level_data_by_platform
     FB_COST_PART_DATE_CUTOFF = "2026-06-03"
+    # 事件日 >= 此日：Unity 消耗并入 unity_ads_api_data（AF 侧 unityads_int 无 cost）
+    UNITY_COST_PART_DATE_CUTOFF = "2026-01-01"
 
     @staticmethod
     def get_cohort_fine_grain_sql(project_id, start_date, end_date):
@@ -61,12 +64,15 @@ class AdAnalysis:
             f"WHEN lower(trim(coalesce(cast({U}.\"ad_name\" AS VARCHAR), ''))) IN ('-', '') THEN '自然量' "
             f"ELSE {U}.\"ad_name\" END"
         )
-        # 自然量判定仍看原始 media 是否空；非自然量时 Facebook/Meta/Instagram 系统一为 'facebook'，避免同计划多字符串拆行
+        # 自然量判定仍看原始 media 是否空；Facebook/Unity 系媒体统一，避免同计划多字符串拆行
         _ms_lower_e = f"lower(trim(coalesce(cast({E}.\"media_source\" AS VARCHAR), '')))"
         _is_fb_media_e = (
             f"({_ms_lower_e} LIKE '%facebook%' OR {_ms_lower_e} LIKE '%instagram%' "
             f"OR {_ms_lower_e} LIKE '%audience network%' OR {_ms_lower_e} IN ('restricted', 'fb') "
             f"OR {_ms_lower_e} LIKE 'meta%')"
+        )
+        _is_unity_media_e = (
+            f"({_ms_lower_e} LIKE '%unity%' OR {_ms_lower_e} IN ('unityads_int', 'unityads'))"
         )
         _ms_lower_u = f"lower(trim(coalesce(cast({U}.\"media_source\" AS VARCHAR), '')))"
         _is_fb_media_u = (
@@ -74,13 +80,17 @@ class AdAnalysis:
             f"OR {_ms_lower_u} LIKE '%audience network%' OR {_ms_lower_u} IN ('restricted', 'fb') "
             f"OR {_ms_lower_u} LIKE 'meta%')"
         )
+        _is_unity_media_u = (
+            f"({_ms_lower_u} LIKE '%unity%' OR {_ms_lower_u} IN ('unityads_int', 'unityads'))"
+        )
         media_e = (
             f"CASE WHEN {E} IS NULL "
             f"OR lower(trim(coalesce(cast({E}.\"campaign_name\" AS VARCHAR), ''))) IN ('-', '') "
             f"OR lower(trim(coalesce(cast({E}.\"ad_group_name\" AS VARCHAR), ''))) IN ('-', '') "
             f"OR lower(trim(coalesce(cast({E}.\"ad_name\" AS VARCHAR), ''))) IN ('-', '') "
             f"OR lower(trim(coalesce(cast({E}.\"media_source\" AS VARCHAR), ''))) IN ('-', '') "
-            f"THEN 'organic' WHEN {_is_fb_media_e} THEN 'facebook' ELSE {E}.\"media_source\" END"
+            f"THEN 'organic' WHEN {_is_fb_media_e} THEN 'facebook' "
+            f"WHEN {_is_unity_media_e} THEN 'unityads_int' ELSE {E}.\"media_source\" END"
         )
         media_u = (
             f"CASE WHEN {U} IS NULL "
@@ -88,7 +98,8 @@ class AdAnalysis:
             f"OR lower(trim(coalesce(cast({U}.\"ad_group_name\" AS VARCHAR), ''))) IN ('-', '') "
             f"OR lower(trim(coalesce(cast({U}.\"ad_name\" AS VARCHAR), ''))) IN ('-', '') "
             f"OR lower(trim(coalesce(cast({U}.\"media_source\" AS VARCHAR), ''))) IN ('-', '') "
-            f"THEN 'organic' WHEN {_is_fb_media_u} THEN 'facebook' ELSE {U}.\"media_source\" END"
+            f"THEN 'organic' WHEN {_is_fb_media_u} THEN 'facebook' "
+            f"WHEN {_is_unity_media_u} THEN 'unityads_int' ELSE {U}.\"media_source\" END"
         )
         os_u = (
             "CASE WHEN lower(COALESCE(CAST(arbitrary(ev.\"#os\") AS VARCHAR), '')) IN ('ios', 'apple') THEN 'iOS' "
@@ -125,8 +136,8 @@ class AdAnalysis:
             f"WHEN {E}.app_id = 'com.solitairemanor.secrets' THEN 'Android' "
             "ELSE 'Unknown' END"
         )
-        # Facebook 费用：同上 account_name 规则优先，再 app_id、#os
-        os_cost_fb = (
+        # Facebook / Unity API 费用：同上 account_name 规则优先，再 app_id、#os
+        os_cost_api = (
             f"CASE WHEN {_acct_is_ios} THEN 'iOS' "
             f"WHEN {_acct_is_android} THEN 'Android' "
             f"WHEN {E}.app_id = 'id6748138347' THEN 'iOS' "
@@ -136,6 +147,7 @@ class AdAnalysis:
             "ELSE 'Unknown' END"
         )
         fb_cut = AdAnalysis.FB_COST_PART_DATE_CUTOFF
+        unity_cut = AdAnalysis.UNITY_COST_PART_DATE_CUTOFF
 
         return f"""
 /* sessionProperties: {{"ignore_downstream_preferences":"true"}} */
@@ -217,11 +229,34 @@ SELECT * FROM (
                     NULL internal_amount_13, NULL internal_amount_14, NULL internal_amount_15, NULL internal_amount_16,
                     NULL internal_amount_17, NULL internal_amount_18, NULL internal_amount_19, NULL internal_amount_20,
                     NULL internal_amount_21, NULL internal_amount_22, NULL internal_amount_23,
-                    NULL internal_amount_24, {os_cost_fb} as os_val
+                    NULL internal_amount_24, {os_cost_api} as os_val
                 FROM v_event_{project_id}
                 WHERE "$part_event" = 'facebook_ad_level_data_by_platform'
                   AND "$part_date" >= '2026-01-01'
                   AND ta_date_trunc('day', "#event_time", 1) >= TIMESTAMP '{fb_cut}'
+                  AND ta_date_trunc('day', "#event_time", 1) >= TIMESTAMP '{start_date}'
+                  AND ta_date_trunc('day', "#event_time", 1) < date_add('day', 1, TIMESTAMP '{end_date}')
+                GROUP BY 1, 2, 3, 4, 5, 31
+                UNION ALL
+                -- 自 {unity_cut} 起 Unity 消耗：媒体固定为 unityads_int（AF 侧无 cost，不读 te_ads_object.media_source）
+                SELECT
+                    {camp_e} AS dim_campaign,
+                    {grp_e} AS dim_ad_group,
+                    {cre_e} AS dim_ad_name,
+                    'unityads_int' AS media_source,
+                    ta_date_trunc('day', "#event_time", 1) AS "$__Date_Time",
+                    CAST(coalesce(SUM(CAST(coalesce("spend", spend) AS DOUBLE)), 0) AS DOUBLE) internal_amount_0,
+                    NULL internal_amount_1, NULL internal_amount_2, NULL internal_amount_3, NULL internal_amount_4,
+                    NULL internal_amount_5, NULL internal_amount_6, NULL internal_amount_7, NULL internal_amount_8,
+                    NULL internal_amount_9, NULL internal_amount_10, NULL internal_amount_11, NULL internal_amount_12,
+                    NULL internal_amount_13, NULL internal_amount_14, NULL internal_amount_15, NULL internal_amount_16,
+                    NULL internal_amount_17, NULL internal_amount_18, NULL internal_amount_19, NULL internal_amount_20,
+                    NULL internal_amount_21, NULL internal_amount_22, NULL internal_amount_23,
+                    NULL internal_amount_24, {os_cost_api} as os_val
+                FROM v_event_{project_id}
+                WHERE "$part_event" = 'unity_ads_api_data'
+                  AND "$part_date" >= '2026-01-01'
+                  AND ta_date_trunc('day', "#event_time", 1) >= TIMESTAMP '{unity_cut}'
                   AND ta_date_trunc('day', "#event_time", 1) >= TIMESTAMP '{start_date}'
                   AND ta_date_trunc('day', "#event_time", 1) < date_add('day', 1, TIMESTAMP '{end_date}')
                 GROUP BY 1, 2, 3, 4, 5, 31
@@ -325,6 +360,7 @@ SELECT * FROM (
         """
         today_str = datetime.date.today().strftime("%Y-%m-%d")
         fb_cut = AdAnalysis.FB_COST_PART_DATE_CUTOFF
+        unity_cut = AdAnalysis.UNITY_COST_PART_DATE_CUTOFF
         _abs_acct_ln = "lower(trim(coalesce(cast(\"account_name\" AS VARCHAR), '')))"
         _abs_acct_ios = (
             f"({_abs_acct_ln} LIKE '% ios %' OR {_abs_acct_ln} LIKE '%-ios-%' OR {_abs_acct_ln} LIKE '%-ios %' "
@@ -350,8 +386,8 @@ SELECT * FROM (
             "WHEN te_ads_object.app_id = 'com.solitairemanor.secrets' THEN 'Android' "
             "ELSE 'Unknown' END"
         )
-        # 全量 Facebook 消耗：同上 account_name 扩展匹配，再 app_id、#os
-        os_cost_abs_fb = (
+        # 全量 Facebook / Unity API 消耗：同上 account_name 扩展匹配，再 app_id、#os
+        os_cost_abs_api = (
             f"CASE WHEN {_abs_acct_ios} THEN 'iOS' "
             f"WHEN {_abs_acct_android} THEN 'Android' "
             "WHEN te_ads_object.app_id = 'id6748138347' THEN 'iOS' "
@@ -398,7 +434,7 @@ SELECT * FROM (
         UNION ALL
         SELECT
             ta_date_trunc('day', "#event_time", 1) AS "$__Date_Time",
-            {os_cost_abs_fb} AS "$__OS",
+            {os_cost_abs_api} AS "$__OS",
             SUM(CAST(coalesce("amount_spent_usd", amount_spent_usd) AS DOUBLE)) AS c0,
             0 AS c1, 0 AS c2, 0 AS c3, 0 AS c4, 0 AS c5, 0 AS c6, 0 AS c7, 0 AS c8, 0 AS c9,
             0 AS c10, 0 AS c11, 0 AS c12, 0 AS c13, 0 AS c14, 0 AS c15, 0 AS c16, 0 AS c17,
@@ -407,6 +443,21 @@ SELECT * FROM (
         WHERE "$part_event" = 'facebook_ad_level_data_by_platform'
           AND "$part_date" >= '2026-01-01'
           AND ta_date_trunc('day', "#event_time", 1) >= TIMESTAMP '{fb_cut}'
+          AND ta_date_trunc('day', "#event_time", 1) >= TIMESTAMP '{start_date}'
+          AND ta_date_trunc('day', "#event_time", 1) < date_add('day', 1, TIMESTAMP '{end_date}')
+        GROUP BY 1, 2
+        UNION ALL
+        SELECT
+            ta_date_trunc('day', "#event_time", 1) AS "$__Date_Time",
+            {os_cost_abs_api} AS "$__OS",
+            SUM(CAST(coalesce("spend", spend) AS DOUBLE)) AS c0,
+            0 AS c1, 0 AS c2, 0 AS c3, 0 AS c4, 0 AS c5, 0 AS c6, 0 AS c7, 0 AS c8, 0 AS c9,
+            0 AS c10, 0 AS c11, 0 AS c12, 0 AS c13, 0 AS c14, 0 AS c15, 0 AS c16, 0 AS c17,
+            0 AS c18, 0 AS c19, 0 AS c20, 0 AS c21, 0 AS c22, 0 AS c23, 0 AS c24
+        FROM v_event_{project_id}
+        WHERE "$part_event" = 'unity_ads_api_data'
+          AND "$part_date" >= '2026-01-01'
+          AND ta_date_trunc('day', "#event_time", 1) >= TIMESTAMP '{unity_cut}'
           AND ta_date_trunc('day', "#event_time", 1) >= TIMESTAMP '{start_date}'
           AND ta_date_trunc('day', "#event_time", 1) < date_add('day', 1, TIMESTAMP '{end_date}')
         GROUP BY 1, 2
