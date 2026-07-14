@@ -59,7 +59,7 @@ class AdAnalysis:
     @staticmethod
     def get_cohort_fine_grain_sql(project_id, start_date, end_date):
         """
-        广告穿透专用：cohort 用户按 first_enter_plot 锁定，归因字段来自 v_user.te_ads_object（计划/组/创意）；
+        广告穿透专用：cohort 用户按 first_start_up 锁定，归因字段来自 v_user.te_ads_object（计划/组/创意）；
         缺归因记「自然量」。消耗与行为在同一五维键上 UNION。
         侧边栏「广告计划/组/创意」均调用本 SQL，不改变语句；展示粒度由 app 层 aggregate_cohort_by_dim_choice 处理。
         结果列顺序需与 data_processor.expected_cols 一致。
@@ -303,7 +303,7 @@ SELECT * FROM (
                     ta_u.dim_campaign, ta_u.dim_ad_group, ta_u.dim_ad_name, ta_u.media_source,
                     ta_date_trunc('day', ta_u.inst_t, 1) AS "$__Date_Time",
                     NULL internal_amount_0,
-                    CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'first_enter_plot', ta_ev."#user_id"))) AS DOUBLE) internal_amount_1,
+                    CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'first_start_up', ta_ev."#user_id"))) AS DOUBLE) internal_amount_1,
                     CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '10', ta_ev."#user_id"))) AS DOUBLE) internal_amount_2,
                     CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '20', ta_ev."#user_id"))) AS DOUBLE) internal_amount_3,
                     CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'applovin_ad_revenue_impression_level' AND ta_ev.ad_format IN ('REWARDED','INTER'), ta_ev."#user_id"))) AS DOUBLE) internal_amount_4,
@@ -331,7 +331,7 @@ SELECT * FROM (
                 FROM (
                     SELECT "#user_id", "$part_event", "level_id", "ad_format", "revenue", "iap_product_currency", "#app_version"
                     FROM v_event_{project_id}
-                    WHERE "$part_event" IN ('first_enter_plot', 'level_start', 'applovin_ad_revenue_impression_level', 'iap_recharge_succeed')
+                    WHERE "$part_event" IN ('first_start_up', 'level_start', 'applovin_ad_revenue_impression_level', 'iap_recharge_succeed')
                       AND "$part_date" >= '2026-01-01'
                       AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce("#zone_offset", 0) AS INTEGER), "#event_time"), 1) >= TIMESTAMP '{start_date}'
                       AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce("#zone_offset", 0) AS INTEGER), "#event_time"), 1) < date_add('day', 1, TIMESTAMP '{today_str}')
@@ -351,7 +351,7 @@ SELECT * FROM (
                             arbitrary(u.first_rv_ecpm) as ecpm
                         FROM v_event_{project_id} ev
                         LEFT JOIN v_user_{project_id} u ON ev."#user_id" = u."#user_id"
-                        WHERE ev."$part_event" = 'first_enter_plot'
+                        WHERE ev."$part_event" = 'first_start_up'
                           AND ev."$part_date" >= '2026-01-01'
                           AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time"), 1) >= TIMESTAMP '{start_date}'
                           AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time"), 1) < date_add('day', 1, TIMESTAMP '{end_date}')
@@ -504,7 +504,7 @@ SELECT * FROM (
             ta_date_trunc('day', ta_u.inst_t, 1) AS "$__Date_Time",
             ta_u.os_display AS "$__OS",
             0 AS c0,
-            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'first_enter_plot', ta_ev."#user_id"))) AS DOUBLE) AS c1,
+            CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'first_start_up', ta_ev."#user_id"))) AS DOUBLE) AS c1,
             CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '10', ta_ev."#user_id"))) AS DOUBLE) AS c2,
             CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'level_start' AND ta_ev.level_id = '20', ta_ev."#user_id"))) AS DOUBLE) AS c3,
             CAST(COUNT(DISTINCT (IF(ta_ev."$part_event" = 'applovin_ad_revenue_impression_level' AND ta_ev.ad_format IN ('REWARDED','INTER'), ta_ev."#user_id"))) AS DOUBLE) AS c4,
@@ -531,7 +531,7 @@ SELECT * FROM (
         FROM (
             SELECT "#user_id", "$part_event", "level_id", "ad_format", "revenue", "iap_product_currency", "#app_version"
             FROM v_event_{project_id}
-            WHERE "$part_event" IN ('first_enter_plot', 'level_start', 'applovin_ad_revenue_impression_level', 'iap_recharge_succeed')
+            WHERE "$part_event" IN ('first_start_up', 'level_start', 'applovin_ad_revenue_impression_level', 'iap_recharge_succeed')
               AND "$part_date" >= '2026-01-01'
               AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce("#zone_offset", 0) AS INTEGER), "#event_time"), 1) >= TIMESTAMP '{start_date}'
               AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce("#zone_offset", 0) AS INTEGER), "#event_time"), 1) < date_add('day', 1, TIMESTAMP '{today_str}')
@@ -547,7 +547,7 @@ SELECT * FROM (
                             ELSE 'Unknown' END AS os_display
                 FROM v_event_{project_id} ev
                 LEFT JOIN v_user_{project_id} u ON ev."#user_id" = u."#user_id"
-                WHERE ev."$part_event" = 'first_enter_plot'
+                WHERE ev."$part_event" = 'first_start_up'
                   AND ev."$part_date" >= '2026-01-01'
                   AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time"), 1) >= TIMESTAMP '{start_date}'
                   AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time"), 1) < date_add('day', 1, TIMESTAMP '{end_date}')
@@ -580,18 +580,18 @@ ORDER BY "Date" DESC, "OS" ASC
     @staticmethod
     def get_empty_result_diagnosis_sql(project_id, start_date, end_date):
         """
-        主查询解析为空时由 app 调用：轻量统计 cohort 窗口内 first_enter_plot 人数与安装日范围，
+        主查询解析为空时由 app 调用：轻量统计 cohort 窗口内 first_start_up 人数与安装日范围，
         过滤条件与 get_cohort_fine_grain_sql 中 cohort 子查询一致，便于排查是否无用户或被账号/测试过滤。
         """
         return f"""
 /* sessionProperties: {{"ignore_downstream_preferences":"true"}} */
 SELECT
-    count(DISTINCT ev."#user_id") AS cohort_first_enter_uv,
+    count(DISTINCT ev."#user_id") AS cohort_first_start_up_uv,
     min(ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time"), 1)) AS min_inst_day,
     max(ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time"), 1)) AS max_inst_day
 FROM v_event_{project_id} ev
 LEFT JOIN v_user_{project_id} u ON ev."#user_id" = u."#user_id"
-WHERE ev."$part_event" = 'first_enter_plot'
+WHERE ev."$part_event" = 'first_start_up'
   AND ev."$part_date" >= '2026-01-01'
   AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time"), 1) >= TIMESTAMP '{start_date}'
   AND ta_date_trunc('day', date_add('hour', -8 - CAST(coalesce(ev."#zone_offset", 0) AS INTEGER), ev."#event_time"), 1) < date_add('day', 1, TIMESTAMP '{end_date}')
